@@ -1,0 +1,8 @@
+execution:
+  mode: rest_sync           # switch to 'stream' when connecting to Next.js SSE frontend
+
+session:
+  type: in_memory           # upgrade to 'redis' for production persistence
+
+logging:
+  level: INFO

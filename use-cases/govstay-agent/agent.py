@@ -5,57 +5,68 @@ load_dotenv()
 
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.prebuilt import create_react_agent
-from agentkernel.cli import CLI
-from agentkernel.langgraph import LangGraphModule, LangGraphToolBuilder
+from langgraph_supervisor import create_supervisor
+from agentkernel.langgraph import LangGraphToolBuilder
 
-from skills.tools import (
-    search_available_rooms,
-    verify_employee,
-    create_booking,
-    review_booking,
-    send_whatsapp_notification,
-)
+from tool import search_available_rooms, verify_employee, create_booking
 
 logger = logging.getLogger("ak.govstay")
 
-SYSTEM_PROMPT = """
-You are the GovStay Assistant, a highly efficient AI designed to help users book and manage government circuit bungalows.
-
-Your capabilities:
-1. Search for available bungalows and rooms using search_available_rooms.
-2. Verify government employee credentials using verify_employee.
-3. Create booking requests using create_booking.
-4. Review and approve/reject bookings using review_booking.
-5. Send notifications via WhatsApp using send_whatsapp_notification.
-
-Rules:
-- Be concise and professional.
-- Ask for clarification if a user's request is ambiguous.
-- Always use the tools provided to fetch real-time data; do not invent or assume availability.
-"""
-
-# Initialize the Gemini model
+# Initialize the Gemini models
+# Full model for specialist agents that need reasoning
 model = ChatGoogleGenerativeAI(model="gemini-2.5-flash")
+# Lite model for routing and security to conserve rate limits
+lite_model = ChatGoogleGenerativeAI(model="gemini-2.5-flash-lite")
 
-# Bind tools using Agent Kernel's LangGraph tool builder
-tools = LangGraphToolBuilder.bind([
-    search_available_rooms,
-    verify_employee,
-    create_booking,
-    review_booking,
-    send_whatsapp_notification,
-])
+# ==========================================
+# SPECIALIZED AGENTS
+# ==========================================
 
-# Create the React Agent Graph
-govstay_agent = create_react_agent(
-    name="govstay",
+search_agent = create_react_agent(
+    name="search_agent",
     model=model,
-    tools=tools,
-    prompt=SYSTEM_PROMPT,
+    tools=LangGraphToolBuilder.bind([search_available_rooms]),
+    prompt=(
+        "You are a Search Agent. You help users find available circuit bungalows using the search_available_rooms tool. "
+        "ALWAYS prefix your final response with '[Search Agent] '."
+    ),
 )
 
-# Register the agent graph with Agent Kernel
-LangGraphModule([govstay_agent])
+verification_agent = create_react_agent(
+    name="verification_agent",
+    model=model,
+    tools=LangGraphToolBuilder.bind([verify_employee]),
+    prompt=(
+        "You are a Verification Agent. You verify government employee IDs using the verify_employee tool. "
+        "ALWAYS prefix your final response with '[Verification Agent] '."
+    ),
+)
 
-if __name__ == "__main__":
-    CLI.main()
+booking_agent = create_react_agent(
+    name="booking_agent",
+    model=model,
+    tools=LangGraphToolBuilder.bind([create_booking]),
+    prompt=(
+        "You are a Booking Agent. You create bookings for users using the create_booking tool. "
+        "ALWAYS prefix your final response with '[Booking Agent] '."
+    ),
+)
+
+# ==========================================
+# SUPERVISOR AGENT
+# ==========================================
+
+triage_agent = create_supervisor(
+    model=lite_model,
+    agents=[search_agent, verification_agent, booking_agent],
+    prompt=(
+        "You are the GovStay Supervisor Agent. Your ONLY job is to invoke the appropriate routing tool to send the user to:\n"
+        "- search_agent: For finding available rooms and bungalows.\n"
+        "- verification_agent: For checking employee IDs.\n"
+        "- booking_agent: For creating or managing bookings.\n"
+        "IMPORTANT: NEVER generate conversational text like 'I have transferred you' or 'I will help you'. "
+        "ONLY invoke the tool to transfer the user, and return exactly what the specialist agent says."
+    ),
+).compile(name="govstay")
+
+AGENTS = [triage_agent, search_agent, verification_agent, booking_agent]

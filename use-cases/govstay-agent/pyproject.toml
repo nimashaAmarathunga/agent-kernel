@@ -1,0 +1,36 @@
+[project]
+name = "govstay-agent"
+version = "0.1.0"
+description = "Agent Kernel multi-agent system for government circuit bungalow bookings"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "agentkernel[cli,langgraph]>=0.6.0",
+    "langchain-google-genai>=4.0.0",
+    "langgraph-supervisor>=0.0.31",
+    "asyncpg>=0.29.0",
+    "python-dotenv>=1.0.0",
+    "google-genai>=1.0.0",
+    "tenacity>=9.0.0",
+    "pyreadline3>=3.4.0",
+]
+
+[dependency-groups]
+dev = [
+    "agentkernel[test]>=0.6.0",
+    "black>=23.0.0",
+    "isort>=5.0.0",
+    "mypy>=1.0.0",
+    "pytest>=8.0.0",
+]
+
+[tool.uv]
+package = false
+
+[tool.isort]
+profile = "black"
+line_length = 120
+
+[tool.black]
+line-length = 120
+target-version = ["py312"]
