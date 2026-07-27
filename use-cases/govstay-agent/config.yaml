@@ -4,5 +4,10 @@ execution:
 session:
   type: in_memory           # upgrade to 'redis' for production persistence
 
+multimodal:
+  enabled: true
+  storage_type: in_memory
+  max_attachments: 5
+
 logging:
   level: INFO

@@ -65,7 +65,7 @@ async def search_available_rooms(input_data: SearchRoomsInput) -> str:
             if input_data.location:
                 rows = await conn.fetch(
                     """
-                    SELECT cb.name, cb.location, r."roomNumber", r."roomType", cb.price
+                    SELECT cb.name, cb.location, r."roomNumber", r."roomType", r.price
                     FROM circuit_bungalows cb
                     JOIN rooms r ON r."circuitBungalowId" = cb.id
                     WHERE cb.location ILIKE $1
@@ -75,7 +75,7 @@ async def search_available_rooms(input_data: SearchRoomsInput) -> str:
             else:
                 rows = await conn.fetch(
                     """
-                    SELECT cb.name, cb.location, r."roomNumber", r."roomType", cb.price
+                    SELECT cb.name, cb.location, r."roomNumber", r."roomType", r.price
                     FROM circuit_bungalows cb
                     JOIN rooms r ON r."circuitBungalowId" = cb.id
                     """
@@ -148,7 +148,7 @@ async def create_booking(input_data: CreateBookingInput) -> str:
             # Resolve room & bungalow IDs
             room = await conn.fetchrow(
                 """
-                SELECT r.id AS room_id, r."circuitBungalowId", cb.price
+                SELECT r.id AS room_id, r."circuitBungalowId", r.price
                 FROM rooms r
                 JOIN circuit_bungalows cb ON cb.id = r."circuitBungalowId"
                 WHERE r."roomNumber" = $1
@@ -194,6 +194,111 @@ async def create_booking(input_data: CreateBookingInput) -> str:
                 f"  Total Cost  : LKR {total_cost:,.2f}\n"
                 f"  Status      : PENDING (awaiting approval)"
             )
+class VerifyDocumentInput(BaseModel):
+    booking_id: str = Field(description="The PENDING booking ID to verify against.")
+    extracted_name: str = Field(description="Name extracted from the document.")
+    extracted_emp_id: str = Field(description="Employee ID extracted from the document.")
+    extracted_from_date: str = Field(description="Check-in date extracted from the document (YYYY-MM-DD).")
+    extracted_to_date: str = Field(description="Check-out date extracted from the document (YYYY-MM-DD).")
+
+class ApproveBookingInput(BaseModel):
+    booking_id: str = Field(description="The ID of the booking to approve or reject.")
+    decision: str = Field(description="'APPROVED' or 'REJECTED'")
+    reason: str = Field(description="Reason for approval or rejection.")
+    confidence_score: float = Field(description="Confidence score between 0.0 and 1.0.")
+
+# ---------------------------------------------------------------------------
+# Document & Approval Tools
+# ---------------------------------------------------------------------------
+
+async def verify_document(input_data: VerifyDocumentInput) -> str:
+    """Verify extracted document data against an existing PENDING booking.
+    
+    Use this after extracting details from an uploaded slip to validate if the
+    slip matches the booking details in the database.
+    """
+    logger.info("Verifying document for booking %s", input_data.booking_id)
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        try:
+            booking = await conn.fetchrow(
+                '''
+                SELECT b."bookingId", b."fromDate", b."toDate", b.status, u.name, u."empId"
+                FROM bookings b
+                JOIN users u ON b."userId" = u.id
+                WHERE b."bookingId" = $1
+                ''',
+                input_data.booking_id
+            )
+            
+            if not booking:
+                return f"Verification Failed: Booking ID '{input_data.booking_id}' not found."
+                
+            if booking['status'] != 'PENDING':
+                return f"Verification Failed: Booking '{input_data.booking_id}' is currently {booking['status']}, not PENDING."
+                
+            # Perform strict matching logic
+            errors = []
+            
+            # Simple substring/case-insensitive matching for names can be robust, but here we expect exact or very close.
+            db_name = booking['name'].lower()
+            ext_name = input_data.extracted_name.lower()
+            if ext_name not in db_name and db_name not in ext_name:
+                errors.append(f"Name mismatch (DB: {booking['name']}, Doc: {input_data.extracted_name})")
+                
+            if booking['empId'] != input_data.extracted_emp_id:
+                errors.append(f"Employee ID mismatch (DB: {booking['empId']}, Doc: {input_data.extracted_emp_id})")
+                
+            db_from = booking['fromDate'].strftime('%Y-%m-%d')
+            if db_from != input_data.extracted_from_date:
+                errors.append(f"Check-in date mismatch (DB: {db_from}, Doc: {input_data.extracted_from_date})")
+                
+            db_to = booking['toDate'].strftime('%Y-%m-%d')
+            if db_to != input_data.extracted_to_date:
+                errors.append(f"Check-out date mismatch (DB: {db_to}, Doc: {input_data.extracted_to_date})")
+                
+            if errors:
+                return f"VERIFICATION FAILED. Errors:\n- " + "\n- ".join(errors) + "\nConfidence Score Drop: Recommend REJECTED."
+            
+            return "VERIFICATION SUCCESSFUL. All document details match the database booking perfectly. Recommend APPROVED."
+            
         except Exception as exc:
-            logger.error("Error creating booking: %s", exc)
-            return "An error occurred while creating the booking. Please try again."
+            logger.error("Error verifying document: %s", exc)
+            return "An error occurred while verifying the document."
+
+async def approve_booking(input_data: ApproveBookingInput) -> str:
+    """Finalize a booking by setting its status to CONFIRMED or REJECTED.
+    
+    Use this to officially approve or reject a PENDING booking.
+    Requires decision, reason, and confidence score.
+    """
+    logger.info("Approving booking %s: %s", input_data.booking_id, input_data.decision)
+    if input_data.decision not in ['APPROVED', 'REJECTED']:
+        return "Decision must be 'APPROVED' or 'REJECTED'."
+        
+    status_enum = 'CONFIRMED' if input_data.decision == 'APPROVED' else 'REJECTED'
+    
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        try:
+            # We must cast the string to the BookingStatus enum in PostgreSQL
+            updated = await conn.execute(
+                '''
+                UPDATE bookings 
+                SET status = $1::"BookingStatus", "approvalReason" = $2, "confidenceScore" = $3, "updatedAt" = now()
+                WHERE "bookingId" = $4 AND status = 'PENDING'
+                ''',
+                status_enum,
+                input_data.reason,
+                input_data.confidence_score,
+                input_data.booking_id
+            )
+            
+            if updated == "UPDATE 0":
+                return f"Failed to update. Booking '{input_data.booking_id}' not found or not in PENDING status."
+                
+            return f"Booking {input_data.booking_id} successfully updated to {status_enum}."
+            
+        except Exception as exc:
+            logger.error("Error updating booking status: %s", exc)
+            return "An error occurred while updating the booking status."
