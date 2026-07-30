@@ -152,3 +152,48 @@ class SanitiseOutputPostHook(PostHook):
             agent_reply.text = reply_text + _DISCLAIMER
 
         return agent_reply
+
+class AuditTracePostHook(PostHook):
+    """Log every agent interaction to the agent_sessions.auditTrace column for the dashboard demo."""
+
+    def name(self) -> str:
+        return "AuditTracePostHook"
+
+    async def on_run(
+        self,
+        session: Session,
+        requests: list[AgentRequest],
+        agent: Agent,
+        agent_reply: AgentReply,
+    ) -> AgentReply:
+        from tool import _get_pool
+        import json
+        
+        try:
+            pool = await _get_pool()
+            async with pool.acquire() as conn:
+                # Fetch existing auditTrace
+                row = await conn.fetchrow(
+                    'SELECT "auditTrace" FROM agent_sessions WHERE "sessionId" = $1',
+                    session.id
+                )
+                
+                trace_array = []
+                if row and row["auditTrace"]:
+                    trace_array = json.loads(row["auditTrace"]) if isinstance(row["auditTrace"], str) else row["auditTrace"]
+                
+                trace_array.append({
+                    "agent": agent.name if agent else "govstay",
+                    "request": [r.model_dump() for r in requests],
+                    "reply": agent_reply.text
+                })
+                
+                await conn.execute(
+                    'UPDATE agent_sessions SET "auditTrace" = $1::jsonb WHERE "sessionId" = $2',
+                    json.dumps(trace_array),
+                    session.id
+                )
+        except Exception as exc:
+            logger.error("Error writing audit trace: %s", exc)
+
+        return agent_reply
