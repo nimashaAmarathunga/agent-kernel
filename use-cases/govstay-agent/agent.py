@@ -39,6 +39,17 @@ lite_model = model
 # SPECIALIZED AGENTS
 # ==========================================
 
+greeting_agent = create_react_agent(
+    name="greeting_agent",
+    model=model,
+    tools=[],
+    prompt=(
+        "You are GovStay, a friendly and polite assistant. "
+        "The user is saying hi or making small talk. Greet them warmly and ask how you can help them with their circuit bungalow bookings today. "
+        "Provide friendly, concise, and natural conversational responses."
+    ),
+)
+
 search_agent = create_react_agent(
     name="search_agent",
     model=model,
@@ -77,9 +88,14 @@ booking_agent = create_react_agent(
     model=model,
     tools=LangGraphToolBuilder.bind([create_booking]),
     prompt=(
-        "You are an assistant for GovStay. You create bookings for users using the create_booking tool. "
-        "Once a booking is created (it will be in PENDING status), instruct the user to upload their approval slip "
-        "for verification. Provide friendly, concise, and natural conversational responses."
+        "You are an assistant for GovStay. You create bookings for users using the create_booking tool.\n\n"
+        "CRITICAL RULES:\n"
+        "1. DO NOT hallucinate or guess any booking details. You MUST gather exactly 4 pieces of information from the user before calling create_booking: Employee ID, Room Number, From Date (YYYY-MM-DD), and To Date (YYYY-MM-DD).\n"
+        "2. If ANY of these 4 details are missing, you MUST ask the user for them.\n"
+        "3. Whenever you extract or receive any of these 4 details, you MUST include a JSON block in your response exactly like this to update the UI:\n"
+        "[UI_SYNC] {\"emp_id\": \"EMP-123\", \"room_number\": \"OLD-101\", \"from_date\": \"2024-03-01\", \"to_date\": \"2024-03-05\"}\n"
+        "Only include the keys you currently know. "
+        "Once a booking is created (it will be in PENDING status), instruct the user to upload their approval slip for verification."
     ),
 )
 
@@ -175,6 +191,7 @@ def custom_router(state: MessagesState) -> str:
     
     prompt = f"""You are a smart conversational router. Look at the recent conversation history to understand the context of the user's latest message.
 Based on what the user is currently trying to do, output EXACTLY ONE of the following words and nothing else:
+- greeting_agent (if they are just saying hi, making small talk, or asking a generic non-booking question)
 - search_agent (if they want to find, look for, or ask about available rooms/bungalows)
 - verification_agent (if they are verifying their employee ID)
 - booking_agent (if they want to book a room, are answering booking questions, or confirming a booking)
@@ -189,15 +206,16 @@ Output only the agent word:"""
     response = lite_model.invoke(prompt)
     choice = response.content.strip().lower()
     
-    valid_agents = ["search_agent", "verification_agent", "booking_agent", "document_agent", "approval_agent"]
+    valid_agents = ["greeting_agent", "search_agent", "verification_agent", "booking_agent", "document_agent", "approval_agent"]
     for agent_name in valid_agents:
         if agent_name in choice:
             return agent_name
             
-    return "search_agent" # default fallback
+    return "greeting_agent" # default fallback for anything else
 
 builder = StateGraph(MessagesState)
 builder.add_node("supervisor", supervisor_node)
+builder.add_node("greeting_agent", greeting_agent)
 builder.add_node("search_agent", search_agent)
 builder.add_node("verification_agent", verification_agent)
 builder.add_node("booking_agent", booking_agent)
@@ -212,6 +230,7 @@ builder.add_conditional_edges(
     "supervisor",
     custom_router,
     {
+        "greeting_agent": "greeting_agent",
         "search_agent": "search_agent",
         "verification_agent": "verification_agent",
         "booking_agent": "booking_agent",
@@ -220,6 +239,7 @@ builder.add_conditional_edges(
     }
 )
 
+builder.add_edge("greeting_agent", END)
 builder.add_edge("search_agent", "tool_fixer")
 builder.add_edge("verification_agent", "tool_fixer")
 builder.add_edge("booking_agent", "tool_fixer")
@@ -232,4 +252,4 @@ memory = MemorySaver()
 triage_agent = builder.compile(checkpointer=memory)
 triage_agent.name = "govstay"
 
-AGENTS = [triage_agent, search_agent, verification_agent, booking_agent, document_agent, approval_agent]
+AGENTS = [triage_agent, greeting_agent, search_agent, verification_agent, booking_agent, document_agent, approval_agent]

@@ -11,6 +11,9 @@ logger = logging.getLogger("ak.govstay.api")
 
 app = FastAPI(title="GovStay Agent API", description="REST API for the GovStay multi-agent system powered by Local LLaMA")
 
+import re
+import json
+
 class ChatRequest(BaseModel):
     message: str
     thread_id: str = "default-thread"
@@ -18,6 +21,7 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     reply: str
     agent_name: str | None = None
+    ui_state: dict | None = None
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat_endpoint(request: ChatRequest):
@@ -48,13 +52,26 @@ async def chat_endpoint(request: ChatRequest):
         
         # Extract the last message from the agent
         last_message = response["messages"][-1]
+        reply_text = last_message.content
+        
+        # Parse [UI_SYNC]
+        ui_state = None
+        sync_match = re.search(r"\[UI_SYNC\]\s*(\{.*?\})", reply_text, re.DOTALL)
+        if sync_match:
+            try:
+                ui_state = json.loads(sync_match.group(1))
+                # Remove it from the text so it doesn't show to the user
+                reply_text = reply_text.replace(sync_match.group(0), "").strip()
+            except Exception as e:
+                logger.error(f"Failed to parse UI_SYNC JSON: {e}")
         
         # We can extract the agent's name if we want to know who responded
         agent_name = last_message.name if hasattr(last_message, "name") else None
         
         return ChatResponse(
-            reply=last_message.content,
-            agent_name=agent_name
+            reply=reply_text,
+            agent_name=agent_name,
+            ui_state=ui_state
         )
         
     except Exception as e:
