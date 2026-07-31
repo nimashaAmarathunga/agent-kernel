@@ -16,7 +16,8 @@ from tool import (
     create_booking, CreateBookingInput,
     verify_document, VerifyDocumentInput,
     approve_booking, ApproveBookingInput,
-    send_whatsapp_notification, SendWhatsAppInput
+    send_whatsapp_notification, SendWhatsAppInput,
+    get_bungalow_knowledge, BungalowKnowledgeInput
 )
 import json
 logger = logging.getLogger("ak.govstay")
@@ -45,18 +46,30 @@ greeting_agent = create_react_agent(
     tools=[],
     prompt=(
         "You are GovStay, a friendly and polite assistant. "
-        "The user is saying hi or making small talk. Greet them warmly and ask how you can help them with their circuit bungalow bookings today. "
-        "Provide friendly, concise, and natural conversational responses."
+        "The user is saying hi or making small talk. Greet them warmly and politely ask how you can help them with their circuit bungalow bookings today.\n\n"
+        "EXAMPLES:\n"
+        "User: hi\n"
+        "Assistant: Hello! Welcome to GovStay. How can I help you with your circuit bungalow booking today?\n\n"
+        "User: who are you\n"
+        "Assistant: I am the GovStay virtual assistant! I'm here to help you find and book government circuit bungalows. What location are you interested in?\n\n"
+        "Always keep it short and friendly."
     ),
 )
 
 search_agent = create_react_agent(
     name="search_agent",
     model=model,
-    tools=LangGraphToolBuilder.bind([search_available_rooms]),
+    tools=LangGraphToolBuilder.bind([search_available_rooms, get_bungalow_knowledge]),
     prompt=(
-        "You are an assistant for GovStay. You help users find available circuit bungalows using the search_available_rooms tool. "
-        "Provide friendly, concise, and natural conversational responses."
+        "You are an assistant for GovStay. You help users find available circuit bungalows and provide information about them.\n"
+        "1. Use `search_available_rooms` if they want to check availability, prices, or room options.\n"
+        "2. Use `get_bungalow_knowledge` if they ask about amenities (like A/C, Hot Water), nearby attractions, or general bungalow descriptions.\n\n"
+        "EXAMPLES:\n"
+        "User: What are the attractions near Polonnaruwa bungalow?\n"
+        "Assistant: [Calls get_bungalow_knowledge with location='Polonnaruwa']\n\n"
+        "User: Are there rooms in Nuwara Eliya?\n"
+        "Assistant: [Calls search_available_rooms with location='Nuwara Eliya']\n\n"
+        "Always be conversational and helpful."
     ),
 )
 
@@ -91,10 +104,12 @@ booking_agent = create_react_agent(
         "You are an assistant for GovStay. You create bookings for users using the create_booking tool.\n\n"
         "CRITICAL RULES:\n"
         "1. DO NOT hallucinate or guess any booking details. You MUST gather exactly 4 pieces of information from the user before calling create_booking: Employee ID, Room Number, From Date (YYYY-MM-DD), and To Date (YYYY-MM-DD).\n"
-        "2. If ANY of these 4 details are missing, you MUST ask the user for them.\n"
-        "3. Whenever you extract or receive any of these 4 details, you MUST include a JSON block in your response exactly like this to update the UI:\n"
-        "[UI_SYNC] {\"emp_id\": \"EMP-123\", \"room_number\": \"OLD-101\", \"from_date\": \"2024-03-01\", \"to_date\": \"2024-03-05\"}\n"
-        "Only include the keys you currently know. "
+        "2. If ANY of these 4 details are missing, you MUST politely ask the user for them. DO NOT call the tool if anything is missing.\n"
+        "3. Whenever you extract or receive any of these 4 details, you MUST output a JSON block exactly like this to update the UI:\n"
+        "[UI_SYNC] {\"emp_id\": \"EMP-123\", \"room_number\": \"OLD-101\", \"from_date\": \"2024-03-01\", \"to_date\": \"2024-03-05\"}\n\n"
+        "EXAMPLES:\n"
+        "User: I want to book room POL-01-AC\n"
+        "Assistant: I can help with that! Could you please provide your Employee ID and the dates you'd like to check in and out? [UI_SYNC] {\"room_number\": \"POL-01-AC\"}\n\n"
         "Once a booking is created (it will be in PENDING status), instruct the user to upload their approval slip for verification."
     ),
 )
@@ -153,6 +168,8 @@ async def tool_fixer_node(state: MessagesState):
             result = None
             if tool_name == "search_available_rooms":
                 result = await search_available_rooms(SearchRoomsInput(**parameters))
+            elif tool_name == "get_bungalow_knowledge":
+                result = await get_bungalow_knowledge(BungalowKnowledgeInput(**parameters))
             elif tool_name == "verify_employee":
                 result = await verify_employee(VerifyEmployeeInput(**parameters))
             elif tool_name == "create_booking":

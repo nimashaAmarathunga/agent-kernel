@@ -36,6 +36,10 @@ class SearchRoomsInput(BaseModel):
     location: Optional[str] = Field(default=None, description="City or region to search in (e.g. 'Nuwara Eliya').")
 
 
+class BungalowKnowledgeInput(BaseModel):
+    location: str = Field(description="The city or region of the bungalow (e.g. 'Nuwara Eliya', 'Polonnaruwa').")
+
+
 class VerifyEmployeeInput(BaseModel):
     emp_id: str = Field(description="Government employee ID (e.g. '245503B').")
 
@@ -94,6 +98,44 @@ async def search_available_rooms(input_data: SearchRoomsInput) -> str:
         except Exception as exc:
             logger.error("Error searching rooms: %s", exc)
             return "An error occurred while searching for rooms. Please try again."
+
+
+async def get_bungalow_knowledge(input_data: BungalowKnowledgeInput) -> str:
+    """Retrieve detailed knowledge about bungalows in a specific location, including amenities and nearby attractions.
+    
+    Use this when the user asks about what amenities are available at a bungalow, 
+    or what attractions/places they can visit nearby.
+    """
+    logger.info("Getting bungalow knowledge | location=%s", input_data.location)
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        try:
+            rows = await conn.fetch(
+                """
+                SELECT name, location, description, amenities, highlights
+                FROM circuit_bungalows
+                WHERE location ILIKE $1
+                """,
+                f"%{input_data.location}%",
+            )
+            
+            if not rows:
+                return f"No bungalow information found for {input_data.location}."
+                
+            lines = [f"Here is the knowledge base information for {input_data.location}:"]
+            for row in rows:
+                lines.append(f"\nBungalow: {row['name']} ({row['location']})")
+                if row['description']:
+                    lines.append(f"Description: {row['description']}")
+                if row['amenities']:
+                    lines.append(f"Amenities: {', '.join(row['amenities']) if isinstance(row['amenities'], list) else row['amenities']}")
+                if row['highlights']:
+                    lines.append(f"Nearby Attractions/Highlights: {', '.join(row['highlights']) if isinstance(row['highlights'], list) else row['highlights']}")
+                    
+            return "\n".join(lines)
+        except Exception as exc:
+            logger.error("Error getting bungalow knowledge: %s", exc)
+            return "An error occurred while fetching bungalow knowledge. Please try again."
 
 
 async def verify_employee(input_data: VerifyEmployeeInput) -> str:

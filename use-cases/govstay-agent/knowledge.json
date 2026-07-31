@@ -1,0 +1,17 @@
+{
+  "nuwara_eliya": {
+    "amenities": ["Hot Water", "Heater", "Blankets", "Tea/Coffee Maker", "TV"],
+    "attractions": ["Hakgala Botanical Garden", "Gregory Lake", "Horton Plains National Park", "Pedro Tea Estate", "Victoria Park"],
+    "description": "Nuwara Eliya bungalows offer a cozy retreat in the cool climate. Perfect for relaxing and visiting tea estates."
+  },
+  "polonnaruwa": {
+    "amenities": ["A/C", "Ceiling Fan", "Mosquito Nets", "TV", "Attached Bathrooms"],
+    "attractions": ["Parakrama Samudra", "Polonnaruwa Vatadage", "Gal Vihara", "Rankoth Vehera", "Minneriya National Park (nearby)"],
+    "description": "Polonnaruwa bungalows are situated near ancient ruins and provide air-conditioned comfort after a long day of historical sightseeing."
+  },
+  "kataragama": {
+    "amenities": ["A/C", "Ceiling Fan", "Parking", "Attached Bathrooms", "Pilgrim Rest Area"],
+    "attractions": ["Ruhunu Maha Kataragama Devalaya", "Kiri Vehera", "Yala National Park (nearby)", "Sella Kataragama"],
+    "description": "Kataragama bungalows are ideal for pilgrims and wildlife enthusiasts visiting the sacred city or Yala."
+  }
+}
