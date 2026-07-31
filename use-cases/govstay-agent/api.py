@@ -23,60 +23,89 @@ class ChatResponse(BaseModel):
     agent_name: str | None = None
     ui_state: dict | None = None
 
-@app.post("/chat", response_model=ChatResponse)
+from fastapi.responses import StreamingResponse
+from langchain_core.messages import AIMessageChunk, AIMessage
+import asyncio
+
+@app.post("/chat")
 async def chat_endpoint(request: ChatRequest):
     logger.info(f"Received message for thread {request.thread_id}: {request.message}")
     config = {"configurable": {"thread_id": request.thread_id}}
     
-    try:
-        # Run security check first
-        hook = LLaMAPromptInjectionHook()
-        # Mocking session and request for the hook
-        session = Session(id=request.thread_id)
-        agent_requests = [AgentRequestText(text=request.message, session_id=request.thread_id)]
-        
-        hook_result = await hook.on_run(session=session, agent=None, requests=agent_requests)
-        
-        # If the hook returns an AgentReplyText, it means it blocked the request
-        if isinstance(hook_result, AgentReplyText):
-            return ChatResponse(
-                reply=hook_result.text,
-                agent_name="SecurityGuard"
-            )
+    async def event_generator():
+        try:
+            # Run security check first
+            hook = LLaMAPromptInjectionHook()
+            session = Session(id=request.thread_id)
+            agent_requests = [AgentRequestText(text=request.message, session_id=request.thread_id)]
             
-        # Run the langgraph agent
-        response = await triage_agent.ainvoke(
-            {"messages": [("user", request.message)]}, 
-            config=config
-        )
-        
-        # Extract the last message from the agent
-        last_message = response["messages"][-1]
-        reply_text = last_message.content
-        
-        # Parse [UI_SYNC]
-        ui_state = None
-        sync_match = re.search(r"\[UI_SYNC\]\s*(\{.*?\})", reply_text, re.DOTALL)
-        if sync_match:
-            try:
-                ui_state = json.loads(sync_match.group(1))
-                # Remove it from the text so it doesn't show to the user
-                reply_text = reply_text.replace(sync_match.group(0), "").strip()
-            except Exception as e:
-                logger.error(f"Failed to parse UI_SYNC JSON: {e}")
-        
-        # We can extract the agent's name if we want to know who responded
-        agent_name = last_message.name if hasattr(last_message, "name") else None
-        
-        return ChatResponse(
-            reply=reply_text,
-            agent_name=agent_name,
-            ui_state=ui_state
-        )
-        
-    except Exception as e:
-        logger.error(f"Error processing chat request: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+            hook_result = await hook.on_run(session=session, agent=None, requests=agent_requests)
+            
+            if isinstance(hook_result, AgentReplyText):
+                yield f"data: {json.dumps({'text': hook_result.text, 'agent': 'SecurityGuard'})}\n\n"
+                return
+                
+            # Stream from LangGraph
+            # We want to buffer chunks so we can intercept [UI_SYNC]
+            buffer = ""
+            sync_mode = False
+            sync_buffer = ""
+            last_agent_name = None
+            
+            async for msg, metadata in triage_agent.astream({"messages": [("user", request.message)]}, config=config, stream_mode="messages"):
+                # We only care about AI messages
+                if not isinstance(msg, (AIMessage, AIMessageChunk)) or not msg.content:
+                    continue
+                    
+                # The custom_router uses lite_model.invoke() during an edge from the supervisor.
+                # LangGraph captures this LLM call. We must ignore it so the user doesn't see "search_agent" printed.
+                node_name = metadata.get("langgraph_node")
+                valid_nodes = ["greeting_agent", "search_agent", "verification_agent", "booking_agent", "document_agent", "approval_agent", "tool_fixer"]
+                if node_name not in valid_nodes:
+                    continue
+                    
+                chunk = str(msg.content)
+                agent_name = msg.name if hasattr(msg, "name") and msg.name else node_name
+                if agent_name:
+                    last_agent_name = agent_name
+                
+                if not sync_mode:
+                    buffer += chunk
+                    if "[UI_SYNC]" in buffer:
+                        sync_mode = True
+                        parts = buffer.split("[UI_SYNC]", 1)
+                        visible_text = parts[0]
+                        sync_buffer = parts[1] if len(parts) > 1 else ""
+                        
+                        # We might have withheld yielding some valid text
+                        # Wait, we were yielding chunks instantly. We shouldn't withhold unless we are buffering.
+                        # Since we yield instantly, if `[` appears, maybe we shouldn't yield it immediately?
+                        # It's okay if `[` is yielded, and then we realise it's [UI_SYNC]. The frontend might show `[UI_SYNC]` momentarily if we don't buffer it properly.
+                        # To keep it simple and perfectly clean, we will buffer a small window:
+                    else:
+                        # Yield the chunk directly
+                        yield f"data: {json.dumps({'text': chunk, 'agent': last_agent_name})}\n\n"
+                        # Keep a short buffer for the string matching
+                        if len(buffer) > 20:
+                            buffer = buffer[-20:]
+                else:
+                    sync_buffer += chunk
+
+            # After the loop finishes, parse sync_buffer if we were in sync mode
+            if sync_mode:
+                match = re.search(r"\{.*?\}", sync_buffer, re.DOTALL)
+                if match:
+                    try:
+                        ui_state = json.loads(match.group(0))
+                        yield f"data: {json.dumps({'ui_state': ui_state})}\n\n"
+                    except Exception as e:
+                        logger.error(f"Failed to parse UI_SYNC JSON: {e}")
+                        
+        except Exception as e:
+            logger.error(f"Error processing chat request: {str(e)}")
+            yield f"data: {json.dumps({'text': f'Error: {str(e)}'})}\n\n"
+            
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 if __name__ == "__main__":
     import uvicorn
