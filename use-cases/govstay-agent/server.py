@@ -9,7 +9,7 @@ from agentkernel.api import RESTAPI
 from agentkernel.langgraph import LangGraphModule
 
 from agent import AGENTS, triage_agent
-from security import GeminiPromptInjectionHook, SanitiseOutputPostHook, AuditTracePostHook
+from security import LLaMAPromptInjectionHook, SanitiseOutputPostHook, AuditTracePostHook
 
 logger = logging.getLogger("ak.govstay_server")
 
@@ -20,7 +20,7 @@ def main() -> None:
     module = LangGraphModule(AGENTS)
 
     # Attach PreHook: blocks prompt injections before reaching any agent
-    module.pre_hook(triage_agent, [GeminiPromptInjectionHook()])
+    module.pre_hook(triage_agent, [LLaMAPromptInjectionHook()])
 
     # Attach PostHook: sanitises output and appends disclaimer, and logs audit trace
     module.post_hook(triage_agent, [SanitiseOutputPostHook(), AuditTracePostHook()])

@@ -9,7 +9,7 @@ from agentkernel.cli import CLI
 from agentkernel.langgraph import LangGraphModule
 
 from agent import AGENTS, triage_agent
-from security import GeminiPromptInjectionHook, SanitiseOutputPostHook, AuditTracePostHook
+from security import LLaMAPromptInjectionHook, SanitiseOutputPostHook, AuditTracePostHook
 
 logger = logging.getLogger("ak.govstay_demo")
 
@@ -21,7 +21,7 @@ def main() -> None:
     module = LangGraphModule(AGENTS)
 
     # Attach PreHook: blocks prompt injections before reaching any agent
-    module.pre_hook(triage_agent, [GeminiPromptInjectionHook()])
+    module.pre_hook(triage_agent, [LLaMAPromptInjectionHook()])
 
 
     logger.info("GovStay agent ready. Security hooks active.")

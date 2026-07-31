@@ -1,4 +1,6 @@
-langchain-google-genai
+langchain-openai
+fastapi
+uvicorn
 asyncpg
 langgraph
 agentkernel

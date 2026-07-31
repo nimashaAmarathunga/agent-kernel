@@ -6,11 +6,11 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "agentkernel[cli,langgraph]>=0.6.0",
-    "langchain-google-genai>=4.0.0",
-    "langgraph-supervisor>=0.0.31",
+    "langchain-openai>=0.1.0",
+    "fastapi>=0.110.0",
+    "uvicorn>=0.29.0",
     "asyncpg>=0.29.0",
     "python-dotenv>=1.0.0",
-    "google-genai>=1.0.0",
     "tenacity>=9.0.0",
     "pyreadline3>=3.4.0",
 ]

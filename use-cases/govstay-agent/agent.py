@@ -3,20 +3,29 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
-from langgraph_supervisor import create_supervisor
+from langgraph.graph import StateGraph, START, END, MessagesState
+from langchain_core.messages import AIMessage
 from agentkernel.langgraph import LangGraphToolBuilder
 
 from tool import search_available_rooms, verify_employee, create_booking, verify_document, approve_booking, send_whatsapp_notification
 
 logger = logging.getLogger("ak.govstay")
 
-# Initialize the Gemini models
-# Full model for specialist agents that need reasoning
-model = ChatGoogleGenerativeAI(model="gemini-2.5-flash")
+# Point to your local Ollama / LLaMA REST API
+local_llm_url = "http://localhost:11434/v1"
+
+# Initialize the Local LLaMA model
+model = ChatOpenAI(
+    model="llama3.1",
+    api_key="not-needed",
+    base_url=local_llm_url,
+    temperature=0.1
+)
+
 # Use the same model for routing to ensure reliable function calling
-lite_model = ChatGoogleGenerativeAI(model="gemini-2.5-flash")
+lite_model = model
 
 # ==========================================
 # SPECIALIZED AGENTS
@@ -85,19 +94,59 @@ approval_agent = create_react_agent(
 # SUPERVISOR AGENT
 # ==========================================
 
-triage_agent = create_supervisor(
-    model=lite_model,
-    agents=[search_agent, verification_agent, booking_agent, document_agent, approval_agent],
-    prompt=(
-        "You are the GovStay Supervisor Agent. Your ONLY job is to invoke the appropriate routing tool to send the user to:\n"
-        "- search_agent: For finding available rooms and bungalows.\n"
-        "- verification_agent: For checking employee IDs.\n"
-        "- booking_agent: For creating new bookings.\n"
-        "- document_agent: For reading and verifying uploaded approval slips.\n"
-        "- approval_agent: For making the final APPROVAL or REJECTION decision on a pending booking.\n"
-        "IMPORTANT: NEVER generate conversational text like 'I have transferred you' or 'I will help you'. "
-        "ONLY invoke the tool to transfer the user, and return exactly what the specialist agent says."
-    ),
-).compile(name="govstay")
+def supervisor_node(state: MessagesState):
+    return {"messages": []}
+
+def custom_router(state: MessagesState) -> str:
+    last_msg = state["messages"][-1].content
+    prompt = f"""You are a router. Based on the user's message, output EXACTLY ONE of the following words and nothing else:
+- search_agent (for finding rooms)
+- verification_agent (for ID verification)
+- booking_agent (for making bookings)
+- document_agent (for uploading slips)
+- approval_agent (for approving bookings)
+
+User message: {last_msg}"""
+    
+    response = lite_model.invoke(prompt)
+    choice = response.content.strip().lower()
+    
+    valid_agents = ["search_agent", "verification_agent", "booking_agent", "document_agent", "approval_agent"]
+    for agent_name in valid_agents:
+        if agent_name in choice:
+            return agent_name
+            
+    return "search_agent" # default fallback
+
+builder = StateGraph(MessagesState)
+builder.add_node("supervisor", supervisor_node)
+builder.add_node("search_agent", search_agent)
+builder.add_node("verification_agent", verification_agent)
+builder.add_node("booking_agent", booking_agent)
+builder.add_node("document_agent", document_agent)
+builder.add_node("approval_agent", approval_agent)
+
+builder.add_edge(START, "supervisor")
+
+builder.add_conditional_edges(
+    "supervisor",
+    custom_router,
+    {
+        "search_agent": "search_agent",
+        "verification_agent": "verification_agent",
+        "booking_agent": "booking_agent",
+        "document_agent": "document_agent",
+        "approval_agent": "approval_agent",
+    }
+)
+
+builder.add_edge("search_agent", END)
+builder.add_edge("verification_agent", END)
+builder.add_edge("booking_agent", END)
+builder.add_edge("document_agent", END)
+builder.add_edge("approval_agent", END)
+
+triage_agent = builder.compile()
+triage_agent.name = "govstay"
 
 AGENTS = [triage_agent, search_agent, verification_agent, booking_agent, document_agent, approval_agent]
