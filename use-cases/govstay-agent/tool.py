@@ -112,7 +112,7 @@ async def get_bungalow_knowledge(input_data: BungalowKnowledgeInput) -> str:
         try:
             rows = await conn.fetch(
                 """
-                SELECT name, location, description, amenities, highlights
+                SELECT name, location, description, amenities, highlights, department
                 FROM circuit_bungalows
                 WHERE location ILIKE $1
                 """,
@@ -125,6 +125,8 @@ async def get_bungalow_knowledge(input_data: BungalowKnowledgeInput) -> str:
             lines = [f"Here is the knowledge base information for {input_data.location}:"]
             for row in rows:
                 lines.append(f"\nBungalow: {row['name']} ({row['location']})")
+                if row['department']:
+                    lines.append(f"Managed by: {row['department']}")
                 if row['description']:
                     lines.append(f"Description: {row['description']}")
                 if row['amenities']:

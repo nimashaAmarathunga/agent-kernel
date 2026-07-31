@@ -76,12 +76,11 @@ async def chat_endpoint(request: ChatRequest):
                         parts = buffer.split("[UI_SYNC]", 1)
                         visible_text = parts[0]
                         sync_buffer = parts[1] if len(parts) > 1 else ""
-                        
-                        # We might have withheld yielding some valid text
-                        # Wait, we were yielding chunks instantly. We shouldn't withhold unless we are buffering.
-                        # Since we yield instantly, if `[` appears, maybe we shouldn't yield it immediately?
-                        # It's okay if `[` is yielded, and then we realise it's [UI_SYNC]. The frontend might show `[UI_SYNC]` momentarily if we don't buffer it properly.
-                        # To keep it simple and perfectly clean, we will buffer a small window:
+                    elif re.search(r"\{\s*\"name\"\s*:", buffer):
+                        # Hide raw JSON tool calls from being streamed to the user
+                        # The tool_fixer_node will handle executing it later
+                        sync_mode = True
+                        sync_buffer = "" # We don't need to parse tool calls in the API, so just discard it from view
                     else:
                         # Yield the chunk directly
                         yield f"data: {json.dumps({'text': chunk, 'agent': last_agent_name})}\n\n"

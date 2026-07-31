@@ -33,7 +33,7 @@ model = ChatOpenAI(
     temperature=0.1
 )
 
-# Use the same model for routing to ensure reliable function calling
+# Reverting to the main model. Using two different models causes Ollama to swap models in and out of VRAM constantly, which takes ~5-10 seconds per turn and causes massive lag!
 lite_model = model
 
 # ==========================================
@@ -62,14 +62,9 @@ search_agent = create_react_agent(
     tools=LangGraphToolBuilder.bind([search_available_rooms, get_bungalow_knowledge]),
     prompt=(
         "You are an assistant for GovStay. You help users find available circuit bungalows and provide information about them.\n"
-        "1. Use `search_available_rooms` if they want to check availability, prices, or room options.\n"
-        "2. Use `get_bungalow_knowledge` if they ask about amenities (like A/C, Hot Water), nearby attractions, or general bungalow descriptions.\n\n"
-        "EXAMPLES:\n"
-        "User: What are the attractions near Polonnaruwa bungalow?\n"
-        "Assistant: [Calls get_bungalow_knowledge with location='Polonnaruwa']\n\n"
-        "User: Are there rooms in Nuwara Eliya?\n"
-        "Assistant: [Calls search_available_rooms with location='Nuwara Eliya']\n\n"
-        "Always be conversational and helpful."
+        "1. ALWAYS call the `search_available_rooms` tool if they want to check availability, prices, or room options.\n"
+        "2. ALWAYS call the `get_bungalow_knowledge` tool if they ask about amenities (like A/C, Hot Water), nearby attractions, or general bungalow descriptions.\n\n"
+        "CRITICAL RULE: YOU MUST CALL A TOOL BEFORE RESPONDING! DO NOT hallucinate or make up information about bungalows or locations! Always get the facts from the tools first."
     ),
 )
 
@@ -106,10 +101,11 @@ booking_agent = create_react_agent(
         "1. DO NOT hallucinate or guess any booking details. You MUST gather exactly 4 pieces of information from the user before calling create_booking: Employee ID, Room Number, From Date (YYYY-MM-DD), and To Date (YYYY-MM-DD).\n"
         "2. If ANY of these 4 details are missing, you MUST politely ask the user for them. DO NOT call the tool if anything is missing.\n"
         "3. Whenever you extract or receive any of these 4 details, you MUST output a JSON block exactly like this to update the UI:\n"
-        "[UI_SYNC] {\"emp_id\": \"EMP-123\", \"room_number\": \"OLD-101\", \"from_date\": \"2024-03-01\", \"to_date\": \"2024-03-05\"}\n\n"
+        "[UI_SYNC] {\"emp_id\": \"<extracted_id>\", \"room_number\": \"<extracted_room>\", \"from_date\": \"<extracted_from_date>\", \"to_date\": \"<extracted_to_date>\"}\n\n"
         "EXAMPLES:\n"
         "User: I want to book room POL-01-AC\n"
         "Assistant: I can help with that! Could you please provide your Employee ID and the dates you'd like to check in and out? [UI_SYNC] {\"room_number\": \"POL-01-AC\"}\n\n"
+        "CRITICAL: Always write a polite conversational response to the user along with the JSON block. Do not just output JSON."
         "Once a booking is created (it will be in PENDING status), instruct the user to upload their approval slip for verification."
     ),
 )
@@ -209,9 +205,9 @@ def custom_router(state: MessagesState) -> str:
     prompt = f"""You are a smart conversational router. Look at the recent conversation history to understand the context of the user's latest message.
 Based on what the user is currently trying to do, output EXACTLY ONE of the following words and nothing else:
 - greeting_agent (if they are just saying hi, making small talk, or asking a generic non-booking question)
-- search_agent (if they want to find, look for, or ask about available rooms/bungalows)
+- search_agent (if they want to find, look for, or ask about available rooms/bungalows, EVEN if they say 'I want to book a place in...' but haven't chosen a specific room yet)
 - verification_agent (if they are verifying their employee ID)
-- booking_agent (if they want to book a room, are answering booking questions, or confirming a booking)
+- booking_agent (ONLY if they are explicitly providing a chosen Room Number, Employee ID, or Dates to create a booking)
 - document_agent (if they are uploading or talking about an approval slip/document)
 - approval_agent (if the document was verified and it is ready for final approval)
 
