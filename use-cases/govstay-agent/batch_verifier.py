@@ -7,7 +7,7 @@ import fitz  # PyMuPDF
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
-from whatsapp_helper import notify_booking_confirmed, notify_booking_rejected
+from telegram_helper import notify_booking_confirmed, notify_booking_rejected
 
 # Use LangChain Ollama for text parsing
 from langchain_openai import ChatOpenAI
@@ -38,7 +38,6 @@ async def process_slip(conn, booking):
     
     # 1. Update status to waking up
     await conn.execute("UPDATE bookings SET \"approvalReason\" = 'Agent: Waking up to process slip...' WHERE id = $1", booking_id)
-    await asyncio.sleep(2)
     
     # Construct full file path
     # slip_url is likely something like "/uploads/slips/slip-123.pdf"
@@ -56,7 +55,6 @@ async def process_slip(conn, booking):
     try:
         # 2. Update status to extracting text
         await conn.execute("UPDATE bookings SET \"approvalReason\" = 'Agent: Extracting text from PDF using OCR...' WHERE id = $1", booking_id)
-        await asyncio.sleep(2)
         
         # Extract text using PyMuPDF
         text = ""
@@ -84,7 +82,6 @@ If you cannot find any amount, output:
 """
         # 3. Update status to LLM validating
         await conn.execute("UPDATE bookings SET \"approvalReason\" = 'Agent: Passing text to LLaMA to validate payment amount...' WHERE id = $1", booking_id)
-        await asyncio.sleep(3)
         
         response = await llm.ainvoke(prompt)
         
@@ -172,8 +169,8 @@ async def verify_loop():
         except Exception as e:
             logger.error(f"Database error in verify loop: {e}")
             
-        # Wait 30 seconds before polling again
-        await asyncio.sleep(30)
+        # Wait 5 seconds before polling again
+        await asyncio.sleep(5)
 
 if __name__ == "__main__":
     asyncio.run(verify_loop())
