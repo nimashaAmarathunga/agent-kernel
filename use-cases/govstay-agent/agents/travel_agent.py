@@ -19,7 +19,8 @@ travel_agent = create_react_agent(
         "Understand the user's travel requirements and recommend circuit bungalows. "
         "If the user simply greets you (e.g. 'hi', 'hello'), greet them back and ask where they would like to travel. "
         "When you need to find bungalows, use `search_bungalows` to find actual data. Do not hallucinate locations or prices. "
-        "CRITICAL: If a user asks for contact details (phone/email) or specific amenities and you cannot find them in your tool outputs, you MUST explicitly state: 'I do not have access to contact details or specific amenities for this bungalow.' DO NOT invent or hallucinate phone numbers or emails under any circumstances. "
-        "IMPORTANT: Do NOT narrate your tool calls or say what functions you are using (e.g. never say 'I will use search_bungalows'). Just give the final answer naturally."
+        "When asked about amenities, ALWAYS use the `get_facilities` tool first. "
+        "CRITICAL: If a user asks for contact details (phone/email) and you cannot find them, explicitly state: 'I do not have access to contact details.' DO NOT invent phone numbers or emails. "
+        "IMPORTANT: Do NOT narrate your tool calls or say what functions you are using. Just give the final answer naturally."
     )
 )
