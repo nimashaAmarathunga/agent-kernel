@@ -80,16 +80,39 @@ async def get_facilities(bungalow_name: str) -> str:
     pool = await get_pool()
     async with pool.acquire() as conn:
         try:
-            row = await conn.fetchrow(
-                "SELECT amenities FROM circuit_bungalows WHERE name ILIKE $1",
-                f"%{bungalow_name}%"
-            )
+            # Support searching by room number OR bungalow name keywords
+            keywords = bungalow_name.replace('-', ' ').split()
+            
+            # 1. First try to match if the user provided a room number directly
+            query_by_room = """
+                SELECT cb.name, cb.amenities 
+                FROM circuit_bungalows cb
+                JOIN rooms r ON r."circuitBungalowId" = cb.id
+                WHERE r."roomNumber" ILIKE $1
+                LIMIT 1
+            """
+            
+            # The input might be "OLD-101" or "Room OLD-101"
+            # We look for any word that matches a room number pattern
+            possible_rooms = [k for k in bungalow_name.split() if '-' in k or k.isdigit()]
+            
+            row = None
+            if possible_rooms:
+                row = await conn.fetchrow(query_by_room, f"%{possible_rooms[0]}%")
+                
+            if not row:
+                # 2. If no room match, fallback to the keyword match on bungalow name
+                conditions = " AND ".join([f"cb.name ILIKE ${i+1}" for i in range(len(keywords))])
+                params = [f"%{k}%" for k in keywords]
+                query_by_name = f"SELECT cb.name, cb.amenities FROM circuit_bungalows cb WHERE {conditions} LIMIT 1"
+                row = await conn.fetchrow(query_by_name, *params)
+            
             if not row or not row["amenities"]:
                 return f"No facility information found for '{bungalow_name}'."
             amenities = row["amenities"]
             if isinstance(amenities, list):
                 amenities = ", ".join(amenities)
-            return f"Facilities at {bungalow_name}: {amenities}"
+            return f"Facilities at {row['name']}: {amenities}"
         except Exception as exc:
             logger.error(f"Error getting facilities: {exc}")
             return "Error retrieving facilities."

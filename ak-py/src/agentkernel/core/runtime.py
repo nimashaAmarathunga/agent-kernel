@@ -230,7 +230,12 @@ class Runtime:
                         if delta is None:
                             break
                     if delta is not None:
-                        yield StreamChunk(delta=delta)
+                        if isinstance(delta, StreamChunk):
+                            yield delta
+                        elif isinstance(delta, dict):
+                            yield StreamChunk(**delta)
+                        else:
+                            yield StreamChunk(delta=delta)
 
                 self.sessions().store(session)
                 yield StreamChunk(done=True, session_id=session.id)

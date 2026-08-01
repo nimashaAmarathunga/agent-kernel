@@ -117,3 +117,22 @@ async def create_booking(emp_id: str, room_number: str, start_date: str, end_dat
         except Exception as exc:
             logger.error(f"Error creating booking: {exc}")
             return f"An error occurred: {exc}"
+
+class SyncUiStateInput(BaseModel):
+    emp_id: str = Field(description="Government employee ID of the user.")
+    room_number: str = Field(description="The room number.")
+    start_date: str = Field(description="Check-in date in YYYY-MM-DD format.")
+    end_date: str = Field(description="Check-out date in YYYY-MM-DD format.")
+    total_cost: float = Field(description="Calculated total cost.")
+
+@tool("sync_ui_state", args_schema=SyncUiStateInput)
+async def sync_ui_state(emp_id: str, room_number: str, start_date: str, end_date: str, total_cost: float) -> dict:
+    """Emit the booking form state to the UI so the user can review and submit the booking manually."""
+    return {
+        "emp_id": emp_id,
+        "room_number": room_number,
+        "from_date": start_date,
+        "to_date": end_date,
+        "total_cost": total_cost,
+        "step": "pending_submission"
+    }

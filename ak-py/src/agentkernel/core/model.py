@@ -123,6 +123,8 @@ class StreamChunk(BaseModel):
     delta: str | None = None
     done: bool = False
     error: str | None = None
+    agent: str | None = None
+    ui_state: dict | None = None
 
 
 class SystemTool(BaseModel):

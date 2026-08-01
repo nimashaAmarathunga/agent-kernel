@@ -24,7 +24,7 @@ from ...core import Runner as BaseRunner
 from ...core import Runtime, Session, ToolBuilder, ToolContext
 from ...core.builder import A2ACardBuilder
 from ...core.config import AKConfig
-from ...core.model import AgentReply, AgentReplyText, AgentRequest, AgentRequestAny, AgentRequestText
+from ...core.model import AgentReply, AgentReplyText, AgentRequest, AgentRequestAny, AgentRequestText, StreamChunk
 from ...core.tool import SystemToolFactory
 from ...core.util.error_util import user_facing_error_message
 from ...trace import Trace
@@ -425,14 +425,27 @@ class LangGraphRunner(BaseRunner):
                 config=config,
                 version="v2",
             ):
+                agent_name = event.get("metadata", {}).get("langgraph_node") or getattr(agent, "name", None)
+                if agent_name not in ["travel_agent", "booking_agent", "verification_agent", "notification_agent"]:
+                    continue
                 if event["event"] == "on_chat_model_stream":
                     content = event["data"]["chunk"].content
                     if isinstance(content, str) and content:
-                        yield content
+                        yield StreamChunk(delta=content, agent=agent_name)
                     elif isinstance(content, list):
                         for item in content:
                             if isinstance(item, dict) and item.get("text"):
-                                yield item["text"]
+                                yield StreamChunk(delta=item["text"], agent=agent_name)
+                elif event["event"] == "on_tool_end" and event["name"] == "sync_ui_state":
+                    output = event["data"].get("output")
+                    if isinstance(output, str):
+                        import json
+                        try:
+                            output = json.loads(output)
+                        except:
+                            pass
+                    if isinstance(output, dict):
+                        yield StreamChunk(ui_state=output, agent=agent_name)
         finally:
             if context is not None:
                 context.reset()

@@ -8,7 +8,8 @@ model = ChatOpenAI(
     api_key="not-needed",
     base_url=OLLAMA_BASE_URL,
     temperature=0.0,
-    max_tokens=5
+    max_tokens=5,
+    tags=["no_stream"]
 )
 
 def supervisor_router(state: ConversationState) -> str:
