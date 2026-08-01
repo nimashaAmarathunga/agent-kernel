@@ -1,5 +1,4 @@
 from __future__ import annotations
-
 import logging
 from dotenv import load_dotenv
 
@@ -8,25 +7,25 @@ load_dotenv()
 from agentkernel.api import RESTAPI
 from agentkernel.langgraph import LangGraphModule
 
-from agent import AGENTS, triage_agent
-from security import LLaMAPromptInjectionHook, SanitiseOutputPostHook, AuditTracePostHook
+from workflows.graph import AGENTS, triage_agent
+from middleware.security import RegexSecurityHook
+from middleware.tracing import AuditTraceHook
 
 logger = logging.getLogger("ak.govstay_server")
 
 def main() -> None:
-    logger.info("Starting GovStay Multi-Agent REST Server...")
+    logger.info("Starting GovStay Multi-Agent REST Server (Optimized v2)...")
 
     # Register all agents with Agent Kernel
     module = LangGraphModule(AGENTS)
 
-    # Attach PreHook: blocks prompt injections before reaching any agent
-    module.pre_hook(triage_agent, [LLaMAPromptInjectionHook()])
+    # Attach PreHook: fast regex blocks prompt injections
+    module.pre_hook(triage_agent, [RegexSecurityHook()])
 
-    # Attach PostHook: sanitises output and appends disclaimer, and logs audit trace
-    module.post_hook(triage_agent, [SanitiseOutputPostHook(), AuditTracePostHook()])
+    # Attach PostHook: logs audit trace
+    module.post_hook(triage_agent, [AuditTraceHook()])
 
     logger.info("GovStay agent API ready on port 8000.")
-    # Run the Agent Kernel REST API (FastAPI under the hood)
     RESTAPI.run()
 
 if __name__ == "__main__":

@@ -1,0 +1,15 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../govstay-ai"
+		}
+	],
+	"settings": {
+		"chat.agentSkillsLocations": [
+			".agents/skills"
+		]
+	}
+}

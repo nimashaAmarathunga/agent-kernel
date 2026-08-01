@@ -2,7 +2,7 @@ import httpx
 import json
 import sys
 
-API_URL = "http://localhost:8001/chat"
+API_URL = "http://localhost:8000/api/v1/chat"
 THREAD_ID = "cli-test-session"
 
 def main():
@@ -22,7 +22,7 @@ def main():
 
             print("Agent: ", end="", flush=True)
             
-            with httpx.stream("POST", API_URL, json={"message": user_input, "thread_id": THREAD_ID}, timeout=60.0) as response:
+            with httpx.stream("POST", API_URL, json={"prompt": user_input, "session_id": THREAD_ID}, timeout=60.0) as response:
                 for line in response.iter_lines():
                     if line.startswith("data: "):
                         data_str = line[6:]
@@ -31,8 +31,8 @@ def main():
                         try:
                             data = json.loads(data_str)
                             # Print text chunk without newline
-                            if "text" in data:
-                                print(data["text"], end="", flush=True)
+                            if "delta" in data and data["delta"]:
+                                print(data["delta"], end="", flush=True)
                                 
                             # If there's a UI sync event, print it on a new line so we can see it
                             if "ui_state" in data and data["ui_state"]:
