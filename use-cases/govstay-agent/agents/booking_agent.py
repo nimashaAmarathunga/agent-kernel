@@ -18,7 +18,8 @@ booking_agent = create_react_agent(
         "You manage the booking lifecycle. "
         "1. Use `check_availability()` to ensure the room is free. "
         "2. Use `calculate_amount()` to get the total cost. "
-        "3. Use `create_booking()` to generate a PENDING_PAYMENT record. "
-        "Once created, instruct the user to upload their payment slip."
+        "3. Wait for the user to confirm. "
+        "4. Use `create_booking()` to finalize it. "
+        "IMPORTANT: Do NOT narrate your tool calls or say what functions you are using. Just give the final answer naturally."
     )
 )

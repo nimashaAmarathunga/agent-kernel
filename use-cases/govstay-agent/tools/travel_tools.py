@@ -20,7 +20,7 @@ async def search_bungalows(location: str | None = None) -> str:
             if location:
                 rows = await conn.fetch(
                     """
-                    SELECT cb.name, cb.location, r."roomNumber", r."roomType", r.price
+                    SELECT cb.name, cb.location, r."roomNumber", r."roomType", r.price, r.capacity, r.bed_count
                     FROM circuit_bungalows cb
                     JOIN rooms r ON r."circuitBungalowId" = cb.id
                     WHERE cb.location ILIKE $1
@@ -30,7 +30,7 @@ async def search_bungalows(location: str | None = None) -> str:
             else:
                 rows = await conn.fetch(
                     """
-                    SELECT cb.name, cb.location, r."roomNumber", r."roomType", r.price
+                    SELECT cb.name, cb.location, r."roomNumber", r."roomType", r.price, r.capacity, r.bed_count
                     FROM circuit_bungalows cb
                     JOIN rooms r ON r."circuitBungalowId" = cb.id
                     """
@@ -43,7 +43,8 @@ async def search_bungalows(location: str | None = None) -> str:
             for row in rows:
                 lines.append(
                     f"- {row['name']} ({row['location']}): "
-                    f"Room {row['roomNumber']} ({row['roomType']}) — LKR {row['price']}/night"
+                    f"Room {row['roomNumber']} ({row['roomType']}) — LKR {row['price']}/night "
+                    f"[Capacity: {row['capacity']} people, Beds: {row['bed_count']}]"
                 )
             return "\n".join(lines)
         except Exception as exc:

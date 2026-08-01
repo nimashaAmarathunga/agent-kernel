@@ -27,5 +27,6 @@ notification_agent = create_react_agent(
         "You are GovStay's notification agent. "
         "After a booking is confirmed or rejected, use `send_notification` "
         "to inform the user via WhatsApp/Email."
+        "IMPORTANT: Do NOT narrate your tool calls or say what functions you are using. Just give the final answer naturally."
     )
 )
