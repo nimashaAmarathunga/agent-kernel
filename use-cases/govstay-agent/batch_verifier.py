@@ -7,6 +7,8 @@ import fitz  # PyMuPDF
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
+from whatsapp_helper import notify_booking_confirmed, notify_booking_rejected
+
 # Use LangChain Ollama for text parsing
 from langchain_openai import ChatOpenAI
 
@@ -48,6 +50,7 @@ async def process_slip(conn, booking):
     if not os.path.exists(file_path):
         logger.error(f"Slip file not found: {file_path}")
         await conn.execute("UPDATE bookings SET status = 'REJECTED', \"approvalReason\" = 'Slip file not found' WHERE id = $1", booking_id)
+        await notify_booking_rejected(booking, "Slip file not found.")
         return
         
     try:
@@ -64,6 +67,7 @@ async def process_slip(conn, booking):
         if not text.strip():
             logger.warning("Could not extract text from PDF. (Might be an image-only PDF)")
             await conn.execute("UPDATE bookings SET status = 'REJECTED', \"approvalReason\" = 'Could not read text from uploaded slip' WHERE id = $1", booking_id)
+            await notify_booking_rejected(booking, "Could not read text from uploaded slip.")
             return
             
         # Ask LLaMA to extract the amount
@@ -97,11 +101,13 @@ If you cannot find any amount, output:
         except json.JSONDecodeError:
             logger.error(f"Failed to parse JSON from LLM: {content}")
             await conn.execute("UPDATE bookings SET status = 'REJECTED', \"approvalReason\" = 'Failed to extract amount from slip automatically' WHERE id = $1", booking_id)
+            await notify_booking_rejected(booking, "Failed to extract amount from slip automatically.")
             return
             
         if not extracted_data.get("found"):
             logger.warning("LLM could not find amount in the slip text.")
             await conn.execute("UPDATE bookings SET status = 'REJECTED', \"approvalReason\" = 'Could not find a valid transferred amount in the slip' WHERE id = $1", booking_id)
+            await notify_booking_rejected(booking, "Could not find a valid transferred amount in the slip.")
             return
             
         amount = float(extracted_data.get("amount", 0))
@@ -116,29 +122,17 @@ If you cannot find any amount, output:
             )
             logger.info(f"Booking {booking['bookingId']} CONFIRMED.")
             
-            # SIMULATED WHATSAPP NOTIFICATION
-            whatsapp_msg = f"""
-=================================================
-📱 [WHATSAPP MESSAGE SENT TO {user_mobile}]
-=================================================
-*GovStay Booking Confirmed!* ✅
-
-Booking ID: {booking['bookingId']}
-Amount Paid: LKR {total_cost}
-
-Your government accommodation has been secured.
-Please present this confirmation at check-in.
-=================================================
-"""
-            logger.info(whatsapp_msg)
+            await notify_booking_confirmed(booking)
         else:
             # Payment insufficient!
+            reason = f"Transferred amount (LKR {amount}) is less than total cost (LKR {total_cost})."
             await conn.execute(
                 "UPDATE bookings SET status = 'REJECTED', \"approvalReason\" = $1, \"confidenceScore\" = 0.99 WHERE id = $2", 
-                f"Transferred amount (LKR {amount}) is less than total cost (LKR {total_cost}).",
+                reason,
                 booking_id
             )
             logger.info(f"Booking {booking['bookingId']} REJECTED due to insufficient funds.")
+            await notify_booking_rejected(booking, reason)
             
     except Exception as e:
         logger.error(f"Error processing slip for booking {booking_id}: {e}")
@@ -154,9 +148,17 @@ async def verify_loop():
             # Find pending bookings that have a slip attached
             records = await conn.fetch(
                 '''
-                SELECT b.id, b."bookingId", b."totalCost", b."paymentSlipUrl", u."mobileNumber" 
+                SELECT 
+                    b.id, b."bookingId", b."totalCost", b."paymentSlipUrl", b."fromDate", b."toDate", b."approvalReason",
+                    u."mobileNumber", u.name AS user_name,
+                    c.name AS bungalow_name, c.location, c.department,
+                    r."roomNumber", r."roomType",
+                    ct.name AS caretaker_name, ct."telephoneNo" AS caretaker_phone
                 FROM bookings b
                 LEFT JOIN users u ON b."userId" = u.id
+                LEFT JOIN circuit_bungalows c ON b."circuitBungalowId" = c.id
+                LEFT JOIN rooms r ON b."roomId" = r.id
+                LEFT JOIN caretakers ct ON c.id = ct."circuitBungalowId"
                 WHERE b.status = $1 AND b."paymentSlipUrl" IS NOT NULL
                 ''',
                 'PENDING'
