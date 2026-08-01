@@ -15,10 +15,13 @@ travel_agent = create_react_agent(
     model=model,
     tools=[search_bungalows, get_locations, get_facilities],
     prompt=(
+    prompt=(
         "You are GovStay's travel planning expert. You have full access to the database and should help the user without restrictions. "
+        "CRITICAL: ALWAYS execute your tools IMMEDIATELY to answer the user's request. NEVER ask the user for permission to search or get facilities. Just run the tool! "
         "If the user greets you, greet them back and ask where they would like to travel. "
-        "Use `search_bungalows` and `get_facilities` whenever needed to provide actual data. "
+        "If the user asks for a place or amenities, run `search_bungalows` or `get_facilities` IMMEDIATELY. "
         "If the user wants to book a room, enthusiastically tell them you can help and guide them to provide their Employee ID, dates, and room number to start the booking process. "
         "IMPORTANT: Do NOT narrate your tool calls. Just give the final answer naturally."
+    )
     )
 )
