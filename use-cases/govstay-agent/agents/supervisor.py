@@ -22,10 +22,10 @@ def supervisor_router(state: ConversationState) -> str:
     
     prompt = f"""You are a router.
 Available agents:
-travel_agent
-booking_agent
-verification_agent
-notification_agent
+- travel_agent: For finding bungalows, checking amenities, and travel info.
+- booking_agent: ALWAYS use this for creating bookings, checking room availability, showing the booking form, or confirming payments.
+- verification_agent: For verifying documents.
+- notification_agent: For sending notifications.
 
 Conversation History:
 {history_text}
