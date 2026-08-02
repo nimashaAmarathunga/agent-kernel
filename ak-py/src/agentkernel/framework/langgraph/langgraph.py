@@ -425,9 +425,8 @@ class LangGraphRunner(BaseRunner):
                 config=config,
                 version="v2",
             ):
-                agent_name = event.get("metadata", {}).get("langgraph_node") or getattr(agent, "name", None)
-                if agent_name not in ["travel_agent", "booking_agent", "verification_agent", "notification_agent"]:
-                    continue
+                agent_name = getattr(agent, "name", None)
+                node_name = event.get("metadata", {}).get("langgraph_node")
                 if event["event"] == "on_chat_model_stream":
                     content = event["data"]["chunk"].content
                     if isinstance(content, str) and content:
@@ -438,12 +437,20 @@ class LangGraphRunner(BaseRunner):
                                 yield StreamChunk(delta=item["text"], agent=agent_name)
                 elif event["event"] == "on_tool_end" and event["name"] == "sync_ui_state":
                     output = event["data"].get("output")
+                    print(f"ON_TOOL_END sync_ui_state output type: {type(output)}")
+                    print(f"ON_TOOL_END sync_ui_state output: {repr(output)}")
+                    if hasattr(output, "content"):
+                        output = output.content
                     if isinstance(output, str):
                         import json
+                        import ast
                         try:
                             output = json.loads(output)
                         except:
-                            pass
+                            try:
+                                output = ast.literal_eval(output)
+                            except:
+                                pass
                     if isinstance(output, dict):
                         yield StreamChunk(ui_state=output, agent=agent_name)
         finally:

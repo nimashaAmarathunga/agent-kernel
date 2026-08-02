@@ -20,6 +20,7 @@ travel_agent = create_react_agent(
         "- If you need to find a room, call `search_bungalows`.\n"
         "- If asked about amenities, call `get_facilities`.\n"
         "- Do NOT ask the user for permission to use tools. Just use them.\n"
+        "- NEVER narrate your actions. Just give the final answer.\n"
         "If the user greets you, greet them back and ask where they want to travel.\n"
         "If the user wants to book, guide them to provide their Employee ID, dates, and room number."
     )

@@ -25,7 +25,8 @@ llm = ChatOpenAI(
     model="llama3.1", 
     base_url="http://localhost:11434/v1", 
     api_key="ollama", 
-    temperature=0
+    temperature=0,
+    model_kwargs={"response_format": {"type": "json_object"}}
 )
 
 async def process_slip(conn, booking):
@@ -107,7 +108,15 @@ If you cannot find any amount, output:
             await notify_booking_rejected(booking, "Could not find a valid transferred amount in the slip.")
             return
             
-        amount = float(extracted_data.get("amount", 0))
+        # Robustly parse amount
+        raw_amt = extracted_data.get("amount", 0)
+        if isinstance(raw_amt, str):
+            raw_amt = raw_amt.replace(",", "").strip()
+            
+        try:
+            amount = float(raw_amt)
+        except (ValueError, TypeError):
+            amount = 0.0
         
         logger.info(f"Booking cost: {total_cost}, Slip amount: {amount}")
         
@@ -140,7 +149,7 @@ async def verify_loop():
     # Run indefinitely
     while True:
         try:
-            conn = await asyncpg.connect(DATABASE_URL)
+            conn = await asyncpg.connect(DATABASE_URL, statement_cache_size=0)
             
             # Find pending bookings that have a slip attached
             records = await conn.fetch(

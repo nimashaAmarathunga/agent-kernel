@@ -1,4 +1,5 @@
 import logging
+import json
 from pydantic import BaseModel, Field
 from database.db_pool import get_pool
 from langchain_core.tools import tool
@@ -18,7 +19,10 @@ async def check_availability(room_number: str, start_date: str, end_date: str) -
     pool = await get_pool()
     async with pool.acquire() as conn:
         try:
-            # Basic implementation for checking overlapping bookings
+            # Convert strings to datetime.date for asyncpg serialization
+            from_d = date.fromisoformat(start_date)
+            to_d = date.fromisoformat(end_date)
+            
             rows = await conn.fetch(
                 """
                 SELECT id FROM bookings
@@ -26,7 +30,7 @@ async def check_availability(room_number: str, start_date: str, end_date: str) -
                 AND status NOT IN ('REJECTED')
                 AND ("fromDate" < $3::date AND "toDate" > $2::date)
                 """,
-                room_number, start_date, end_date
+                room_number, from_d, to_d
             )
             if rows:
                 return {"available": False, "error": "Room is already booked for these dates."}
@@ -70,10 +74,11 @@ class CreateBookingInput(BaseModel):
     start_date: str = Field(description="Check-in date in YYYY-MM-DD format.")
     end_date: str = Field(description="Check-out date in YYYY-MM-DD format.")
     total_cost: float = Field(description="Calculated total cost.")
+    payment_slip_url: str = Field(description="URL of the uploaded payment slip.")
 
 @tool("create_booking", args_schema=CreateBookingInput)
-async def create_booking(emp_id: str, room_number: str, start_date: str, end_date: str, total_cost: float) -> str:
-    """Create a PENDING_PAYMENT booking record."""
+async def create_booking(emp_id: str, room_number: str, start_date: str, end_date: str, total_cost: float, payment_slip_url: str) -> str:
+    """Create a PENDING booking record."""
     logger.info(f"Creating booking | emp_id={emp_id} room={room_number}")
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -93,26 +98,31 @@ async def create_booking(emp_id: str, room_number: str, start_date: str, end_dat
             if not room:
                 return f"Cannot create booking: room '{room_number}' not found."
 
+            # Convert strings to datetime.date for asyncpg
+            from_d = date.fromisoformat(start_date)
+            to_d = date.fromisoformat(end_date)
+
             booking = await conn.fetchrow(
                 """
                 INSERT INTO bookings (id, "bookingId", "userId", "circuitBungalowId", "roomId",
-                                      "fromDate", "toDate", status, "totalCost", "createdAt", "updatedAt")
+                                      "fromDate", "toDate", status, "totalCost", "paymentSlipUrl", "createdAt", "updatedAt")
                 VALUES (gen_random_uuid(), gen_random_uuid()::text, $1, $2, $3,
-                        $4::date, $5::date, 'PENDING_PAYMENT', $6, now(), now())
+                        $4::date, $5::date, 'PENDING', $6, $7, now(), now())
                 RETURNING "bookingId"
                 """,
                 user["id"],
                 room["circuitBungalowId"],
                 room["room_id"],
-                start_date,
-                end_date,
+                from_d,
+                to_d,
                 total_cost,
+                payment_slip_url
             )
             return (
                 f"Booking created successfully!\n"
                 f"Booking ID: {booking['bookingId']}\n"
-                f"Status: PENDING_PAYMENT\n"
-                f"Please upload your payment slip to confirm the booking."
+                f"Status: PENDING (Awaiting Verification)\n"
+                f"The payment slip has been received and will be verified shortly."
             )
         except Exception as exc:
             logger.error(f"Error creating booking: {exc}")
@@ -126,13 +136,14 @@ class SyncUiStateInput(BaseModel):
     total_cost: float = Field(description="Calculated total cost.")
 
 @tool("sync_ui_state", args_schema=SyncUiStateInput)
-async def sync_ui_state(emp_id: str, room_number: str, start_date: str, end_date: str, total_cost: float) -> dict:
+async def sync_ui_state(emp_id: str, room_number: str, start_date: str, end_date: str, total_cost: float) -> str:
     """Emit the booking form state to the UI so the user can review and submit the booking manually."""
-    return {
+    logger.warning(f"SYNC UI STATE TRIGGERED for {emp_id} {room_number}")
+    return json.dumps({
         "emp_id": emp_id,
         "room_number": room_number,
         "from_date": start_date,
         "to_date": end_date,
         "total_cost": total_cost,
         "step": "pending_submission"
-    }
+    })
