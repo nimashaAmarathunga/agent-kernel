@@ -10,77 +10,46 @@ multi-agent architecture orchestrated by Agent Kernel.
 
 ## Components
 
-### 1. Agents (LangGraph via `langgraph-supervisor`)
+### 1. Agents (LangGraph via Supervisor)
 
 | Agent | Role | Model |
 |-------|------|-------|
-| **Triage Agent** (Supervisor) | Evaluates user intent and routes to the appropriate specialist | `gemini-2.5-flash-lite` |
-| **Search Agent** | Queries the database for available rooms by location | `gemini-2.5-flash` |
-| **Verification Agent** | Verifies a government employee ID against the `users` table | `gemini-2.5-flash` |
-| **Booking Agent** | Creates a `PENDING` booking record in the `bookings` table | `gemini-2.5-flash` |
+| **Triage Agent** (Supervisor) | Evaluates user intent and routes to the appropriate specialist | `llama3.2:3b` |
+| **Travel Agent** | Queries the database for available rooms, locations, and facilities | `qwen2.5:7b` |
+| **Verification Agent** | Verifies a government employee ID against the database | `qwen2.5:7b` |
+| **Booking Agent** | Manages the booking process for circuit bungalows | `qwen2.5:7b` |
+| **Notification Agent** | Handles sending notifications (e.g. via Telegram) | `qwen2.5:7b` |
 
-The lite model is intentionally used for the supervisor to conserve API rate-limit quota since
-routing does not require heavy reasoning.
+The system runs on local Ollama models. The smaller, faster `llama3.2:3b` model is used for the supervisor to ensure rapid intent routing without consuming heavy compute, while the larger `qwen2.5:7b` model handles the complex reasoning required for native tool calling in the specialist agents.
 
-### 2. Tools (`tool.py` — Pydantic validated)
+### 2. Tools (Pydantic validated)
 
-All tool inputs use strict Pydantic models to prevent malformed arguments from reaching the database.
+All tool inputs use strict Pydantic models to prevent malformed arguments from reaching the database. Tools are connected directly to the reasoning agent for efficient querying.
 
-| Tool | Input Schema | Database Operation |
-|------|--------------|--------------------|
-| `search_available_rooms` | `SearchRoomsInput(location?)` | `SELECT` join on `circuit_bungalows` + `rooms` |
-| `verify_employee` | `VerifyEmployeeInput(emp_id)` | `SELECT` on `users` by `empId` |
-| `create_booking` | `CreateBookingInput(emp_id, room_number, from_date, to_date)` | `INSERT` into `bookings` with `PENDING` status |
+### 3. Security and Tracing (Middleware Hooks)
 
-A module-level `asyncpg.Pool` (min 2, max 10 connections) is created once at startup and shared
-across all tool calls, avoiding repeated TCP handshakes.
+#### `RegexSecurityHook` (PreHook)
 
-### 3. Security (`security.py` — Agent Kernel Hooks)
+- Intercepts every `AgentRequestText` before it reaches the supervisor.
+- Uses a fast regex-based blocklist to detect prompt injections, jailbreaks, and SQL injection attempts (e.g., matching "ignore previous instructions", "drop table", etc.).
+- Instantly blocks malicious queries without any LLM API latency or cost.
 
-#### `GeminiPromptInjectionHook` (PreHook)
+#### `AuditTraceHook` (PostHook)
 
-- Intercepts every `AgentRequestText` before it reaches any agent.
-- Sends a YES/NO classification prompt to `gemini-2.5-flash-lite` to detect prompt injections,
-  jailbreaks, and SQL injection attempts.
-- Uses `tenacity` exponential backoff (10 s → 20 s → 40 s) to automatically retry on `429
-  RESOURCE_EXHAUSTED` errors without crashing.
-- Fail-open policy: if Gemini is unavailable after all retries, the request is allowed through
-  to avoid blocking legitimate users during an API outage.
+- Records a complete audit trail of the conversation.
+- Logs interactions and ensures that session responses are traced appropriately for debugging and accountability.
 
-#### `SanitiseOutputPostHook` (PostHook)
+### 4. Server and Execution
 
-- Scans every agent reply for internal error strings (`asyncpg`, `Traceback`, `sqlalchemy`, etc.).
-- If a leak is detected, the reply is replaced with a safe generic error message.
-- Appends a standard government AI disclaimer to all clean replies.
-
-### 4. Configuration (`config.yaml`)
-
-```yaml
-execution:
-  mode: rest_sync   # set to 'stream' for Next.js SSE integration
-
-session:
-  type: in_memory   # upgrade to 'redis' for durable cross-restart sessions
-
-logging:
-  level: INFO
-```
-
-### 5. Session Management
-
-Agent Kernel's built-in session system is used via `config.yaml`. The current backend is
-`in_memory` (suitable for development). For production, switch `session.type` to `redis` and
-configure `session.redis.url` — no code changes are required.
+The application is split into two primary execution modes:
+- **`server.py`**: Boots up the `RESTAPI` using Agent Kernel, listening on port 8000. It also registers the LangGraph module and applies the middleware security and tracing hooks.
+- **`cli_client.py`**: A fast, terminal-based CLI client that streams responses from the REST API to the user, syncing UI state when applicable.
+- **`start_all.py`**: A convenient script that concurrently starts both the server and a background `batch_verifier.py`.
 
 ---
 
 ## Future Enhancements
 
-- **Next.js SSE integration**: Switch `config.yaml` to `execution.mode: stream` and update
-  `main.py` to use Agent Kernel's built-in `RESTAPI` to stream responses to the frontend.
-- **JWT authentication**: Implement `AuthValidator` in `main.py` to validate Next.js session
-  tokens and bind the authenticated `userId` to each conversation.
-- **Redis session persistence**: Upgrade `session.type` to `redis` for durable cross-session
-  memory (e.g., remembering a verified employee ID across restarts).
-- **Booking conflict detection**: Before inserting, query the `bookings` table to check whether
-  the requested room is already booked for the overlapping date range.
+- **Next.js SSE integration**: Connect the Agent Kernel `RESTAPI` stream directly to the Next.js frontend application.
+- **JWT authentication**: Implement an `AuthValidator` to secure REST endpoints and tie sessions to verified users.
+- **Redis session persistence**: Upgrade `session.type` to `redis` in `config.yaml` for durable cross-session memory (e.g., remembering a verified employee ID across restarts).

@@ -8,8 +8,9 @@ load_dotenv()
 from agentkernel.cli import CLI
 from agentkernel.langgraph import LangGraphModule
 
-from agent import AGENTS, triage_agent
-from security import LLaMAPromptInjectionHook, SanitiseOutputPostHook, AuditTracePostHook
+from workflows.graph import AGENTS, triage_agent
+from middleware.security import RegexSecurityHook
+from middleware.tracing import AuditTraceHook
 
 logger = logging.getLogger("ak.govstay_demo")
 
@@ -21,7 +22,10 @@ def main() -> None:
     module = LangGraphModule(AGENTS)
 
     # Attach PreHook: blocks prompt injections before reaching any agent
-    module.pre_hook(triage_agent, [LLaMAPromptInjectionHook()])
+    module.pre_hook(triage_agent, [RegexSecurityHook()])
+    
+    # Attach PostHook: audit tracing
+    module.post_hook(triage_agent, [AuditTraceHook()])
 
 
     logger.info("GovStay agent ready. Security hooks active.")
