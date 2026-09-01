@@ -1,8 +1,7 @@
-from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
 from langchain_core.tools import tool
 import logging
-from config import REASONING_MODEL, OLLAMA_BASE_URL
+from config import get_model
 
 logger = logging.getLogger("ak.govstay.agents.notification")
 
@@ -13,12 +12,7 @@ async def send_notification(emp_id: str, message: str) -> str:
     # In production, this uses Agent Kernel's built-in Telegram integration
     return f"Notification sent to {emp_id}."
 
-model = ChatOpenAI(
-    model=REASONING_MODEL,
-    api_key="not-needed",
-    base_url=OLLAMA_BASE_URL,
-    temperature=0.0
-)
+model = get_model(role="reasoning", temperature=0.0)
 
 notification_agent = create_react_agent(
     model=model,

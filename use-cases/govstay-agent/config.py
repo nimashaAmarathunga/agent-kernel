@@ -21,3 +21,17 @@ VISION_MODEL = os.environ.get("VISION_MODEL", "qwen2.5-vl")
 
 # Ollama Endpoint
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434/v1")
+
+# LLM Provider Configuration
+LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "groq").lower()
+
+def get_model(role="reasoning", temperature=0.0, max_tokens=None, tags=None):
+    from langchain_groq import ChatGroq
+    model_name = "openai/gpt-oss-20b" if role == "router" else "openai/gpt-oss-120b"
+    return ChatGroq(
+        model=model_name,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        tags=tags,
+        streaming=True
+    )

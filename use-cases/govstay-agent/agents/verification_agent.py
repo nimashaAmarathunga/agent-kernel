@@ -1,14 +1,8 @@
-from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
 from tools.verification_tools import verify_employee, process_payment_slip
-from config import REASONING_MODEL, OLLAMA_BASE_URL
+from config import get_model
 
-model = ChatOpenAI(
-    model=REASONING_MODEL,
-    api_key="not-needed",
-    base_url=OLLAMA_BASE_URL,
-    temperature=0.0
-)
+model = get_model(role="reasoning", temperature=0.0)
 
 verification_agent = create_react_agent(
     model=model,

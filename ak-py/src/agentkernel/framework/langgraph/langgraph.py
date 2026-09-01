@@ -435,7 +435,7 @@ class LangGraphRunner(BaseRunner):
                         for item in content:
                             if isinstance(item, dict) and item.get("text"):
                                 yield StreamChunk(delta=item["text"], agent=agent_name)
-                elif event["event"] == "on_tool_end" and event["name"] == "sync_ui_state":
+                elif event["event"] == "on_tool_end" and event["name"] in ["sync_ui_state", "create_booking"]:
                     output = event["data"].get("output")
                     print(f"ON_TOOL_END sync_ui_state output type: {type(output)}")
                     print(f"ON_TOOL_END sync_ui_state output: {repr(output)}")

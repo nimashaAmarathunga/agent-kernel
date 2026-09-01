@@ -4,3 +4,4 @@ uvicorn
 asyncpg
 langgraph
 agentkernel
+langchain-groq

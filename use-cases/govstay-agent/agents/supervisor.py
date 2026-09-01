@@ -1,16 +1,8 @@
-from langchain_openai import ChatOpenAI
 from models.state import ConversationState
-from config import ROUTER_MODEL, OLLAMA_BASE_URL
+from config import get_model
 
 # Fast generation, strictly limited
-model = ChatOpenAI(
-    model=ROUTER_MODEL,
-    api_key="not-needed",
-    base_url=OLLAMA_BASE_URL,
-    temperature=0.0,
-    max_tokens=5,
-    tags=["no_stream"]
-)
+model = get_model(role="router", temperature=0.0, max_tokens=5, tags=["no_stream"])
 
 def supervisor_router(state: ConversationState) -> str:
     """

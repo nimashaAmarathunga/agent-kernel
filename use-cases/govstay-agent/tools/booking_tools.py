@@ -68,35 +68,35 @@ async def calculate_amount(room_number: str, start_date: str, end_date: str) -> 
             logger.error(f"Error calculating amount: {exc}")
             return {"error": str(exc)}
 
+import json
+
 class CreateBookingInput(BaseModel):
     emp_id: str = Field(description="Government employee ID of the user.")
     room_number: str = Field(description="The room number to book.")
     start_date: str = Field(description="Check-in date in YYYY-MM-DD format.")
     end_date: str = Field(description="Check-out date in YYYY-MM-DD format.")
-    total_cost: float = Field(description="Calculated total cost.")
-    payment_slip_url: str = Field(description="URL of the uploaded payment slip.")
 
 @tool("create_booking", args_schema=CreateBookingInput)
-async def create_booking(emp_id: str, room_number: str, start_date: str, end_date: str, total_cost: float, payment_slip_url: str) -> str:
-    """Create a PENDING booking record."""
-    logger.info(f"Creating booking | emp_id={emp_id} room={room_number}")
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        try:
-            user = await conn.fetchrow('SELECT id FROM users WHERE "empId" = $1', emp_id)
-            if not user:
-                return f"Cannot create booking: employee ID '{emp_id}' not found."
+async def create_booking(emp_id: str, room_number: str, start_date: str, end_date: str) -> str:
+    """Create the booking in the database and return the Booking ID and UI state for the summary."""
+    logger.warning(f"CREATE BOOKING TRIGGERED for {emp_id} {room_number}")
+    try:
+        cost_info = await calculate_amount.ainvoke({"room_number": room_number, "start_date": start_date, "end_date": end_date})
+        if "error" in cost_info:
+            return f"Error calculating cost: {cost_info['error']}"
+        total_cost = cost_info["total_amount"]
 
-            room = await conn.fetchrow(
-                """
-                SELECT r.id AS room_id, r."circuitBungalowId"
-                FROM rooms r
-                WHERE r."roomNumber" = $1
-                """,
-                room_number,
-            )
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            # Verify employee exists
+            user = await conn.fetchrow("SELECT id FROM users WHERE \"empId\" = $1", emp_id)
+            if not user:
+                return f"Error: Employee ID {emp_id} not found in the system."
+            
+            # Verify room exists
+            room = await conn.fetchrow("SELECT id as room_id, \"circuitBungalowId\" FROM rooms WHERE \"roomNumber\" = $1", room_number)
             if not room:
-                return f"Cannot create booking: room '{room_number}' not found."
+                return f"Error: Room {room_number} not found."
 
             # Convert strings to datetime.date for asyncpg
             from_d = date.fromisoformat(start_date)
@@ -116,29 +116,81 @@ async def create_booking(emp_id: str, room_number: str, start_date: str, end_dat
                 from_d,
                 to_d,
                 total_cost,
-                payment_slip_url
+                'PENDING_UPLOAD'
             )
-            return (
-                f"Booking created successfully!\n"
-                f"Booking ID: {booking['bookingId']}\n"
-                f"Status: PENDING (Awaiting Verification)\n"
-                f"The payment slip has been received and will be verified shortly."
+            
+            ui_state = {
+                "emp_id": emp_id,
+                "room_number": room_number,
+                "from_date": start_date,
+                "to_date": end_date,
+                "total_cost": total_cost,
+                "booking_id": booking['bookingId']
+            }
+            
+            return json.dumps({
+                "emp_id": emp_id,
+                "room_number": room_number,
+                "from_date": start_date,
+                "to_date": end_date,
+                "total_cost": total_cost,
+                "booking_id": booking['bookingId'],
+                "_llm_instruction": "Booking created successfully. Instruct the user to review the summary and explicitly ask them to upload their payment slip using the UI upload button."
+            })
+    except Exception as exc:
+        logger.error(f"Error creating booking: {exc}")
+        return f"An error occurred: {exc}"
+
+class UploadSlipInput(BaseModel):
+    booking_id: str = Field(description="The Booking ID (Reference Number) returned from create_booking.")
+    payment_slip_url: str = Field(description="URL of the uploaded payment slip.")
+
+@tool("upload_payment_slip", args_schema=UploadSlipInput)
+async def upload_payment_slip(booking_id: str, payment_slip_url: str) -> str:
+    """Associate the uploaded payment slip with the existing booking and trigger verification."""
+    logger.warning(f"UPLOAD SLIP TRIGGERED for {booking_id}")
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            result = await conn.execute(
+                """
+                UPDATE bookings 
+                SET "paymentSlipUrl" = $1, status = 'PENDING', "updatedAt" = now()
+                WHERE "bookingId" = $2
+                """,
+                payment_slip_url, 
+                booking_id
             )
-        except Exception as exc:
-            logger.error(f"Error creating booking: {exc}")
-            return f"An error occurred: {exc}"
+            if result == "UPDATE 0":
+                return f"Error: Booking ID {booking_id} not found."
+            return "Payment slip uploaded successfully. The payment is now being verified."
+    except Exception as exc:
+        logger.error(f"Error uploading slip: {exc}")
+        return f"An error occurred: {exc}"
 
 class SyncUiStateInput(BaseModel):
     emp_id: str = Field(description="Government employee ID of the user.")
     room_number: str = Field(description="The room number.")
     start_date: str = Field(description="Check-in date in YYYY-MM-DD format.")
     end_date: str = Field(description="Check-out date in YYYY-MM-DD format.")
-    total_cost: float = Field(description="Calculated total cost.")
 
 @tool("sync_ui_state", args_schema=SyncUiStateInput)
-async def sync_ui_state(emp_id: str, room_number: str, start_date: str, end_date: str, total_cost: float) -> str:
+async def sync_ui_state(emp_id: str, room_number: str, start_date: str, end_date: str) -> str:
     """Emit the booking form state to the UI so the user can review and submit the booking manually."""
     logger.warning(f"SYNC UI STATE TRIGGERED for {emp_id} {room_number}")
+    
+    # 1. Check Availability
+    avail = await check_availability.ainvoke({"room_number": room_number, "start_date": start_date, "end_date": end_date})
+    if not avail.get("available", False):
+        return f"Room is not available: {avail.get('error', 'Already booked')}"
+        
+    # 2. Calculate Amount
+    cost_info = await calculate_amount.ainvoke({"room_number": room_number, "start_date": start_date, "end_date": end_date})
+    if "error" in cost_info:
+        return f"Error calculating cost: {cost_info['error']}"
+        
+    total_cost = cost_info["total_amount"]
+
     return json.dumps({
         "emp_id": emp_id,
         "room_number": room_number,
