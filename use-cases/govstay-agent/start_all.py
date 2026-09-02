@@ -3,7 +3,7 @@ import sys
 import os
 import time
 
-venv_python = os.path.join(".venv", "Scripts", "python.exe")
+venv_python = sys.executable
 
 print("Starting GovStay Server and Batch Verifier at the same time...")
 
