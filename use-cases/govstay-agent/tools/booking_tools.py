@@ -79,7 +79,10 @@ class CreateBookingInput(BaseModel):
 @tool("create_booking", args_schema=CreateBookingInput)
 async def create_booking(room_number: str, start_date: str, end_date: str) -> str:
     """Create the booking in the database and return the Booking ID and UI state for the summary."""
-    context = ToolContext.current()
+    try:
+        context = ToolContext.get()
+    except RuntimeError:
+        context = None
     user_data = None
     if context:
         for req in context.requests:
@@ -130,7 +133,7 @@ async def create_booking(room_number: str, start_date: str, end_date: str) -> st
                 from_d,
                 to_d,
                 total_cost,
-                'PENDING_UPLOAD'
+                None
             )
             
             ui_state = {
@@ -149,7 +152,7 @@ async def create_booking(room_number: str, start_date: str, end_date: str) -> st
                 "to_date": end_date,
                 "total_cost": total_cost,
                 "booking_id": booking['bookingId'],
-                "status": "PENDING_UPLOAD",
+                "status": "PENDING",
                 "_llm_instruction": "Booking created successfully. Instruct the user to review the summary and explicitly ask them to upload their payment slip using the UI upload button."
             })
     except Exception as exc:
@@ -163,7 +166,10 @@ class UploadSlipInput(BaseModel):
 @tool("upload_payment_slip", args_schema=UploadSlipInput)
 async def upload_payment_slip(booking_id: str, payment_slip_url: str) -> str:
     """Associate the uploaded payment slip with the existing booking and trigger verification."""
-    context = ToolContext.current()
+    try:
+        context = ToolContext.get()
+    except RuntimeError:
+        context = None
     user_data = None
     if context:
         for req in context.requests:
@@ -178,22 +184,23 @@ async def upload_payment_slip(booking_id: str, payment_slip_url: str) -> str:
     try:
         pool = await get_pool()
         async with pool.acquire() as conn:
-            result = await conn.execute(
+            # The Next.js API /api/upload handles the actual insertion into payment_slips
+            slip = await conn.fetchrow(
                 """
-                UPDATE bookings 
-                SET "paymentSlipUrl" = $1, status = 'PENDING', "updatedAt" = now()
-                WHERE "bookingId" = $2
+                SELECT id FROM payment_slips 
+                WHERE "bookingId" = (SELECT id FROM bookings WHERE "bookingId" = $1)
                 """,
-                payment_slip_url, 
                 booking_id
             )
-            if result == "UPDATE 0":
-                return f"Error: Booking ID {booking_id} not found."
-            return json.dumps({
-                "booking_id": booking_id,
-                "status": "PENDING",
-                "_llm_instruction": "Payment slip uploaded successfully. The payment is now being verified."
-            })
+            
+            if slip:
+                return json.dumps({
+                    "status": "success",
+                    "message": "Payment slip verified in database. The background worker will process it.",
+                    "_llm_instruction": "Acknowledge the payment slip upload and tell the user it is pending verification."
+                })
+            else:
+                return "Error: Could not find the uploaded payment slip metadata in the database."
     except Exception as exc:
         logger.error(f"Error uploading slip: {exc}")
         return f"An error occurred: {exc}"
@@ -207,7 +214,10 @@ class SyncUiStateInput(BaseModel):
 async def sync_ui_state(room_number: str = "", start_date: str = "", end_date: str = "") -> str:
     """Emit the booking form state to the UI so the user can review and submit the booking manually."""
     
-    context = ToolContext.current()
+    try:
+        context = ToolContext.get()
+    except RuntimeError:
+        context = None
     user_data = None
     if context:
         for req in context.requests:

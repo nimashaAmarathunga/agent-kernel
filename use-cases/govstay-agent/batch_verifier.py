@@ -12,13 +12,20 @@ from telegram_helper import notify_booking_confirmed, notify_booking_rejected
 # Use LangChain Ollama for text parsing
 from langchain_openai import ChatOpenAI
 
+from supabase import create_client, Client
+import tempfile
+
 load_dotenv()
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("ak.batch_verifier")
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/postgres")
-NEXT_JS_PUBLIC_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "govstay-ai", "public"))
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
+SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+
+# Initialize Supabase client
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # Use our local LLaMA
 llm = ChatOpenAI(
@@ -31,7 +38,7 @@ llm = ChatOpenAI(
 
 async def process_slip(conn, booking):
     booking_id = booking['id']
-    slip_url = booking['paymentSlipUrl']
+    slip_url = booking['storagePath']
     total_cost = booking['totalCost']
     user_mobile = booking['mobileNumber'] or "UNKNOWN_NUMBER"
     
@@ -40,18 +47,20 @@ async def process_slip(conn, booking):
     # 1. Update status to waking up
     await conn.execute("UPDATE bookings SET \"approvalReason\" = 'Agent: Waking up to process slip...' WHERE id = $1", booking_id)
     
-    # Construct full file path
-    # slip_url is likely something like "/uploads/slips/slip-123.pdf"
-    if slip_url.startswith("/"):
-        slip_url = slip_url[1:]
-    
-    file_path = os.path.join(NEXT_JS_PUBLIC_DIR, slip_url.replace("/", os.sep))
-    
-    if not os.path.exists(file_path):
-        logger.error(f"Slip file not found: {file_path}")
-        await conn.execute("UPDATE bookings SET status = 'REJECTED', \"approvalReason\" = 'Slip file not found' WHERE id = $1", booking_id)
-        await notify_booking_rejected(booking, "Slip file not found.")
+    # Download file from Supabase securely
+    try:
+        response = supabase.storage.from_('payment-slips').download(slip_url)
+    except Exception as e:
+        logger.error(f"Slip file not found or download error: {e}")
+        await conn.execute("UPDATE payment_slips SET \"verificationStatus\" = 'REJECTED' WHERE \"bookingId\" = $1", booking_id)
+        await conn.execute("UPDATE bookings SET status = 'REJECTED', \"approvalReason\" = 'Slip file not found in secure storage' WHERE id = $1", booking_id)
+        await notify_booking_rejected(booking, "Slip file not found in secure storage.")
         return
+
+    # Write to a temporary file
+    temp_fd, temp_path = tempfile.mkstemp(suffix=".pdf")
+    os.write(temp_fd, response)
+    os.close(temp_fd)
         
     try:
         # 2. Update status to extracting text
@@ -59,7 +68,7 @@ async def process_slip(conn, booking):
         
         # Extract text using PyMuPDF
         text = ""
-        with fitz.open(file_path) as doc:
+        with fitz.open(temp_path) as doc:
             for page in doc:
                 text += page.get_text()
                 
@@ -142,6 +151,10 @@ If you cannot find any amount, output:
             
     except Exception as e:
         logger.error(f"Error processing slip for booking {booking_id}: {e}")
+    finally:
+        # Clean up temp file
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
         
 async def verify_loop():
     logger.info("Starting batch verification loop...")
@@ -155,17 +168,18 @@ async def verify_loop():
             records = await conn.fetch(
                 '''
                 SELECT 
-                    b.id, b."bookingId", b."totalCost", b."paymentSlipUrl", b."fromDate", b."toDate", b."approvalReason",
+                    b.id, b."bookingId", b."totalCost", p."storagePath", b."fromDate", b."toDate", b."approvalReason",
                     u."mobileNumber", u.name AS user_name,
                     c.name AS bungalow_name, c.location, c.department,
                     r."roomNumber", r."roomType",
                     ct.name AS caretaker_name, ct."telephoneNo" AS caretaker_phone
                 FROM bookings b
+                INNER JOIN payment_slips p ON b.id = p."bookingId"
                 LEFT JOIN users u ON b."userId" = u.id
                 LEFT JOIN circuit_bungalows c ON b."circuitBungalowId" = c.id
                 LEFT JOIN rooms r ON b."roomId" = r.id
                 LEFT JOIN caretakers ct ON c.id = ct."circuitBungalowId"
-                WHERE b.status = $1 AND b."paymentSlipUrl" IS NOT NULL
+                WHERE b.status = $1 AND p."verificationStatus" = 'PENDING'
                 ''',
                 'PENDING'
             )
