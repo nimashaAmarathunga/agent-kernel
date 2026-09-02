@@ -14,17 +14,28 @@ class CheckAvailabilityInput(BaseModel):
     end_date: str = Field(description="Check-out date in YYYY-MM-DD format.")
 
 @tool("check_availability", args_schema=CheckAvailabilityInput)
-async def check_availability(room_number: str, start_date: str, end_date: str, ctx: ToolContext) -> dict:
+async def check_availability(room_number: str, start_date: str, end_date: str) -> dict:
     """Check if a specific room is available for the given dates."""
     logger.info(f"Checking availability for {room_number} from {start_date} to {end_date}")
+    
+    try:
+        context = ToolContext.get()
+    except RuntimeError:
+        context = None
+        
+    user_id = None
+    if context:
+        for req in context.requests:
+            if getattr(req, "name", None) == "user" and req.content and req.content.get("authenticated"):
+                user_id = req.content["id"]
+                break
+    
     pool = await get_pool()
     async with pool.acquire() as conn:
         try:
             # Convert strings to datetime.date for asyncpg serialization
             from_d = date.fromisoformat(start_date)
             to_d = date.fromisoformat(end_date)
-            
-            user_id = ctx.user.id if ctx.user else None
             
             if user_id:
                 rows = await conn.fetch(
@@ -245,7 +256,7 @@ class SyncUiStateInput(BaseModel):
     end_date: str = Field(default="", description="Check-out date in YYYY-MM-DD format.")
 
 @tool("sync_ui_state", args_schema=SyncUiStateInput)
-async def sync_ui_state(room_number: str = "", start_date: str = "", end_date: str = "") -> str:
+async def sync_ui_state(room_number: str, start_date: str, end_date: str) -> str:
     """Emit the booking form state to the UI so the user can review and submit the booking manually."""
     
     try:
@@ -266,12 +277,12 @@ async def sync_ui_state(room_number: str = "", start_date: str = "", end_date: s
     total_cost = None
     if room_number and start_date and end_date:
         # 1. Check Availability
-        avail = await check_availability.ainvoke({"room_number": room_number, "start_date": start_date, "end_date": end_date})
+        avail = await check_availability.func(room_number=room_number, start_date=start_date, end_date=end_date)
         if not avail.get("available", False):
             return f"Room is not available: {avail.get('error', 'Already booked')}"
             
         # 2. Calculate Amount
-        cost_info = await calculate_amount.ainvoke({"room_number": room_number, "start_date": start_date, "end_date": end_date})
+        cost_info = await calculate_amount.func(room_number=room_number, start_date=start_date, end_date=end_date)
         if "error" in cost_info:
             return f"Error calculating cost: {cost_info['error']}"
         total_cost = cost_info["total_amount"]
