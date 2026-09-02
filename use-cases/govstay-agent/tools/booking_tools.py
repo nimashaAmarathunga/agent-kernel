@@ -277,12 +277,12 @@ async def sync_ui_state(room_number: str, start_date: str, end_date: str) -> str
     total_cost = None
     if room_number and start_date and end_date:
         # 1. Check Availability
-        avail = await check_availability.func(room_number=room_number, start_date=start_date, end_date=end_date)
+        avail = await check_availability.coroutine(room_number=room_number, start_date=start_date, end_date=end_date)
         if not avail.get("available", False):
             return f"Room is not available: {avail.get('error', 'Already booked')}"
             
         # 2. Calculate Amount
-        cost_info = await calculate_amount.func(room_number=room_number, start_date=start_date, end_date=end_date)
+        cost_info = await calculate_amount.coroutine(room_number=room_number, start_date=start_date, end_date=end_date)
         if "error" in cost_info:
             return f"Error calculating cost: {cost_info['error']}"
         total_cost = cost_info["total_amount"]
