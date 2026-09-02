@@ -5,3 +5,6 @@ asyncpg
 langgraph
 agentkernel
 langchain-groq
+python-dotenv
+supabase
+requests

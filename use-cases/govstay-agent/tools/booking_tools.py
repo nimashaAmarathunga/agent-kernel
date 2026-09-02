@@ -14,7 +14,7 @@ class CheckAvailabilityInput(BaseModel):
     end_date: str = Field(description="Check-out date in YYYY-MM-DD format.")
 
 @tool("check_availability", args_schema=CheckAvailabilityInput)
-async def check_availability(room_number: str, start_date: str, end_date: str) -> dict:
+async def check_availability(room_number: str, start_date: str, end_date: str, ctx: ToolContext) -> dict:
     """Check if a specific room is available for the given dates."""
     logger.info(f"Checking availability for {room_number} from {start_date} to {end_date}")
     pool = await get_pool()
@@ -24,15 +24,29 @@ async def check_availability(room_number: str, start_date: str, end_date: str) -
             from_d = date.fromisoformat(start_date)
             to_d = date.fromisoformat(end_date)
             
-            rows = await conn.fetch(
-                """
-                SELECT id FROM bookings
-                WHERE "roomId" = (SELECT id FROM rooms WHERE "roomNumber" = $1)
-                AND status NOT IN ('REJECTED')
-                AND ("fromDate" < $3::date AND "toDate" > $2::date)
-                """,
-                room_number, from_d, to_d
-            )
+            user_id = ctx.user.id if ctx.user else None
+            
+            if user_id:
+                rows = await conn.fetch(
+                    """
+                    SELECT id FROM bookings
+                    WHERE "roomId" = (SELECT id FROM rooms WHERE "roomNumber" = $1)
+                    AND (status = 'CONFIRMED' OR (status = 'PENDING' AND "userId" != $4))
+                    AND ("fromDate" < $3::date AND "toDate" > $2::date)
+                    """,
+                    room_number, from_d, to_d, user_id
+                )
+            else:
+                rows = await conn.fetch(
+                    """
+                    SELECT id FROM bookings
+                    WHERE "roomId" = (SELECT id FROM rooms WHERE "roomNumber" = $1)
+                    AND status NOT IN ('REJECTED')
+                    AND ("fromDate" < $3::date AND "toDate" > $2::date)
+                    """,
+                    room_number, from_d, to_d
+                )
+                
             if rows:
                 return {"available": False, "error": "Room is already booked for these dates."}
             return {"available": True}
@@ -119,22 +133,42 @@ async def create_booking(room_number: str, start_date: str, end_date: str) -> st
             from_d = date.fromisoformat(start_date)
             to_d = date.fromisoformat(end_date)
 
-            booking = await conn.fetchrow(
+            # Look for an existing PENDING booking for this user and room
+            existing_booking = await conn.fetchrow(
                 """
-                INSERT INTO bookings (id, "bookingId", "userId", "circuitBungalowId", "roomId",
-                                      "fromDate", "toDate", status, "totalCost", "paymentSlipUrl", "createdAt", "updatedAt")
-                VALUES (gen_random_uuid(), gen_random_uuid()::text, $1, $2, $3,
-                        $4::date, $5::date, 'PENDING', $6, $7, now(), now())
-                RETURNING "bookingId"
+                SELECT id, "bookingId" FROM bookings 
+                WHERE "userId" = $1 AND "roomId" = $2 AND status = 'PENDING'
                 """,
-                user["id"],
-                room["circuitBungalowId"],
-                room["room_id"],
-                from_d,
-                to_d,
-                total_cost,
-                None
+                user["id"], room["room_id"]
             )
+
+            if existing_booking:
+                booking = await conn.fetchrow(
+                    """
+                    UPDATE bookings 
+                    SET "fromDate" = $1::date, "toDate" = $2::date, "totalCost" = $3, "updatedAt" = now()
+                    WHERE id = $4
+                    RETURNING "bookingId"
+                    """,
+                    from_d, to_d, total_cost, existing_booking["id"]
+                )
+            else:
+                booking = await conn.fetchrow(
+                    """
+                    INSERT INTO bookings (id, "bookingId", "userId", "circuitBungalowId", "roomId",
+                                          "fromDate", "toDate", status, "totalCost", "paymentSlipUrl", "createdAt", "updatedAt")
+                    VALUES (gen_random_uuid(), gen_random_uuid()::text, $1, $2, $3,
+                            $4::date, $5::date, 'PENDING', $6, $7, now(), now())
+                    RETURNING "bookingId"
+                    """,
+                    user["id"],
+                    room["circuitBungalowId"],
+                    room["room_id"],
+                    from_d,
+                    to_d,
+                    total_cost,
+                    None
+                )
             
             ui_state = {
                 "emp_id": emp_id,
