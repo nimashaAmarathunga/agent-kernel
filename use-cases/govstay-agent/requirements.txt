@@ -8,3 +8,5 @@ langchain-groq
 python-dotenv
 supabase
 requests
+PyMuPDF
+python-multipart
