@@ -15,6 +15,7 @@ booking_agent = create_react_agent(
         "- If asked about amenities, call `get_facilities`.\n"
         "- Do NOT ask the user for permission to use tools. Just use them.\n"
         "- NEVER narrate your actions. Just give the final answer.\n"
+        "- When discussing capacity, STRICTLY distinguish between 'Number of Rooms', 'Physical Beds', and 'Sleeping Capacity (people)'. Use EXACTLY the numbers returned by tools. NEVER guess or hallucinate capacities.\n"
         "- If the user greets you, greet them back and ask where they want to travel.\n"
         "- The current year is 2026. If the user gives a date like 'August 9', automatically format it to YYYY-MM-DD (e.g. 2026-08-09) BEFORE passing it to tools. Do NOT complain about date formats.\n"
         "STEPS:\n"

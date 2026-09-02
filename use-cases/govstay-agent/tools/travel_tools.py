@@ -44,7 +44,7 @@ async def search_bungalows(location: str | None = None) -> str:
                 lines.append(
                     f"- {row['name']} ({row['location']}): "
                     f"Room {row['roomNumber']} ({row['roomType']}) — LKR {row['price']}/night "
-                    f"[Capacity: {row['capacity']} people, Beds: {row['bed_count']}]"
+                    f"[Capacity: {row['capacity']} people, Physical Beds: {row['bed_count']}]"
                 )
             return "\n".join(lines)
         except Exception as exc:
