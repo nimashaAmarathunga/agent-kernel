@@ -135,6 +135,7 @@ async def create_booking(emp_id: str, room_number: str, start_date: str, end_dat
                 "to_date": end_date,
                 "total_cost": total_cost,
                 "booking_id": booking['bookingId'],
+                "status": "PENDING_UPLOAD",
                 "_llm_instruction": "Booking created successfully. Instruct the user to review the summary and explicitly ask them to upload their payment slip using the UI upload button."
             })
     except Exception as exc:
@@ -163,33 +164,38 @@ async def upload_payment_slip(booking_id: str, payment_slip_url: str) -> str:
             )
             if result == "UPDATE 0":
                 return f"Error: Booking ID {booking_id} not found."
-            return "Payment slip uploaded successfully. The payment is now being verified."
+            return json.dumps({
+                "booking_id": booking_id,
+                "status": "PENDING",
+                "_llm_instruction": "Payment slip uploaded successfully. The payment is now being verified."
+            })
     except Exception as exc:
         logger.error(f"Error uploading slip: {exc}")
         return f"An error occurred: {exc}"
 
 class SyncUiStateInput(BaseModel):
-    emp_id: str = Field(description="Government employee ID of the user.")
-    room_number: str = Field(description="The room number.")
-    start_date: str = Field(description="Check-in date in YYYY-MM-DD format.")
-    end_date: str = Field(description="Check-out date in YYYY-MM-DD format.")
+    emp_id: str = Field(default="", description="Government employee ID of the user.")
+    room_number: str = Field(default="", description="The room number.")
+    start_date: str = Field(default="", description="Check-in date in YYYY-MM-DD format.")
+    end_date: str = Field(default="", description="Check-out date in YYYY-MM-DD format.")
 
 @tool("sync_ui_state", args_schema=SyncUiStateInput)
-async def sync_ui_state(emp_id: str, room_number: str, start_date: str, end_date: str) -> str:
+async def sync_ui_state(emp_id: str = "", room_number: str = "", start_date: str = "", end_date: str = "") -> str:
     """Emit the booking form state to the UI so the user can review and submit the booking manually."""
     logger.warning(f"SYNC UI STATE TRIGGERED for {emp_id} {room_number}")
     
-    # 1. Check Availability
-    avail = await check_availability.ainvoke({"room_number": room_number, "start_date": start_date, "end_date": end_date})
-    if not avail.get("available", False):
-        return f"Room is not available: {avail.get('error', 'Already booked')}"
-        
-    # 2. Calculate Amount
-    cost_info = await calculate_amount.ainvoke({"room_number": room_number, "start_date": start_date, "end_date": end_date})
-    if "error" in cost_info:
-        return f"Error calculating cost: {cost_info['error']}"
-        
-    total_cost = cost_info["total_amount"]
+    total_cost = None
+    if room_number and start_date and end_date:
+        # 1. Check Availability
+        avail = await check_availability.ainvoke({"room_number": room_number, "start_date": start_date, "end_date": end_date})
+        if not avail.get("available", False):
+            return f"Room is not available: {avail.get('error', 'Already booked')}"
+            
+        # 2. Calculate Amount
+        cost_info = await calculate_amount.ainvoke({"room_number": room_number, "start_date": start_date, "end_date": end_date})
+        if "error" in cost_info:
+            return f"Error calculating cost: {cost_info['error']}"
+        total_cost = cost_info["total_amount"]
 
     return json.dumps({
         "emp_id": emp_id,
@@ -199,3 +205,4 @@ async def sync_ui_state(emp_id: str, room_number: str, start_date: str, end_date
         "total_cost": total_cost,
         "step": "pending_submission"
     })
+
