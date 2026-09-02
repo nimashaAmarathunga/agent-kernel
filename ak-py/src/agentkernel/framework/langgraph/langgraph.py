@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import json
 from collections.abc import AsyncGenerator
 from typing import Any, AsyncIterator, Callable, Iterator, List, Optional, Sequence
 
@@ -333,13 +334,23 @@ class LangGraphRunner(BaseRunner):
         :return: Tuple of (prompt, is_valid).
         """
         prompt = ""
+        user_context = None
         for req in requests:
             if isinstance(req, AgentRequestAny):
+                if req.name == "user" and req.content:
+                    user_context = req.content
                 continue
             if isinstance(req, AgentRequestText):
                 prompt = prompt + "\n" + req.text if prompt else req.text
             else:
                 return prompt, False
+                
+        if user_context:
+            user_info = json.dumps(user_context, default=str)
+            prompt = f"[SYSTEM: Current Session Context (Authoritative):\nUser: {user_info}]\n\n" + prompt
+        else:
+            prompt = f"[SYSTEM: Current Session Context (Authoritative):\nUser: GUEST (Not logged in)]\n\n" + prompt
+            
         return prompt, True
 
     def _prepare_session_and_messages(self, agent: Any, session: Session, prompt: str) -> tuple[dict, list]:
@@ -427,14 +438,22 @@ class LangGraphRunner(BaseRunner):
             ):
                 agent_name = getattr(agent, "name", None)
                 node_name = event.get("metadata", {}).get("langgraph_node")
+                
+                # Emit WORKING / COMPLETED for the specific agent nodes
+                if node_name in ["travel_agent", "booking_agent", "verification_agent", "notification_agent"]:
+                    if event["event"] == "on_chain_start" and event["name"] == node_name:
+                        yield StreamChunk(agent=node_name, status="WORKING")
+                    elif event["event"] == "on_chain_end" and event["name"] == node_name:
+                        yield StreamChunk(agent=node_name, status="COMPLETED")
+
                 if event["event"] == "on_chat_model_stream":
                     content = event["data"]["chunk"].content
                     if isinstance(content, str) and content:
-                        yield StreamChunk(delta=content, agent=agent_name)
+                        yield StreamChunk(delta=content, agent=node_name or agent_name)
                     elif isinstance(content, list):
                         for item in content:
                             if isinstance(item, dict) and item.get("text"):
-                                yield StreamChunk(delta=item["text"], agent=agent_name)
+                                yield StreamChunk(delta=item["text"], agent=node_name or agent_name)
                 elif event["event"] == "on_tool_end" and event["name"] in ["sync_ui_state", "create_booking", "upload_payment_slip"]:
                     output = event["data"].get("output")
                     print(f"ON_TOOL_END sync_ui_state output type: {type(output)}")

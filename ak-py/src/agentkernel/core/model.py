@@ -124,6 +124,7 @@ class StreamChunk(BaseModel):
     done: bool = False
     error: str | None = None
     agent: str | None = None
+    status: str | None = None
     ui_state: dict | None = None
 
 

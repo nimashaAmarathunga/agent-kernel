@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field
 from database.db_pool import get_pool
 from langchain_core.tools import tool
 from datetime import date
+from agentkernel.core import ToolContext
 
 logger = logging.getLogger("ak.govstay.tools.booking")
 
@@ -71,15 +72,28 @@ async def calculate_amount(room_number: str, start_date: str, end_date: str) -> 
 import json
 
 class CreateBookingInput(BaseModel):
-    emp_id: str = Field(description="Government employee ID of the user.")
     room_number: str = Field(description="The room number to book.")
     start_date: str = Field(description="Check-in date in YYYY-MM-DD format.")
     end_date: str = Field(description="Check-out date in YYYY-MM-DD format.")
 
 @tool("create_booking", args_schema=CreateBookingInput)
-async def create_booking(emp_id: str, room_number: str, start_date: str, end_date: str) -> str:
+async def create_booking(room_number: str, start_date: str, end_date: str) -> str:
     """Create the booking in the database and return the Booking ID and UI state for the summary."""
-    logger.warning(f"CREATE BOOKING TRIGGERED for {emp_id} {room_number}")
+    context = ToolContext.current()
+    user_data = None
+    if context:
+        for req in context.requests:
+            if getattr(req, "name", None) == "user" and req.content:
+                user_data = req.content
+                break
+                
+    if not user_data or not user_data.get("authenticated"):
+        return "System Error: The user is not authenticated. Do not create a booking. Instruct the user to log in or register."
+        
+    user_id = user_data["id"]
+    emp_id = user_data.get("empId", "")
+    
+    logger.warning(f"CREATE BOOKING TRIGGERED for {user_id} {room_number}")
     try:
         cost_info = await calculate_amount.ainvoke({"room_number": room_number, "start_date": start_date, "end_date": end_date})
         if "error" in cost_info:
@@ -88,10 +102,10 @@ async def create_booking(emp_id: str, room_number: str, start_date: str, end_dat
 
         pool = await get_pool()
         async with pool.acquire() as conn:
-            # Verify employee exists
-            user = await conn.fetchrow("SELECT id FROM users WHERE \"empId\" = $1", emp_id)
+            # Verify user exists in the backend by their actual ID
+            user = await conn.fetchrow("SELECT id FROM users WHERE id = $1", user_id)
             if not user:
-                return f"Error: Employee ID {emp_id} not found in the system."
+                return f"Error: Authenticated user ID {user_id} not found in the system."
             
             # Verify room exists
             room = await conn.fetchrow("SELECT id as room_id, \"circuitBungalowId\" FROM rooms WHERE \"roomNumber\" = $1", room_number)
@@ -149,6 +163,17 @@ class UploadSlipInput(BaseModel):
 @tool("upload_payment_slip", args_schema=UploadSlipInput)
 async def upload_payment_slip(booking_id: str, payment_slip_url: str) -> str:
     """Associate the uploaded payment slip with the existing booking and trigger verification."""
+    context = ToolContext.current()
+    user_data = None
+    if context:
+        for req in context.requests:
+            if getattr(req, "name", None) == "user" and req.content:
+                user_data = req.content
+                break
+                
+    if not user_data or not user_data.get("authenticated"):
+        return "System Error: The user is not authenticated. Do not upload the payment slip. Instruct the user to log in."
+        
     logger.warning(f"UPLOAD SLIP TRIGGERED for {booking_id}")
     try:
         pool = await get_pool()
@@ -174,14 +199,24 @@ async def upload_payment_slip(booking_id: str, payment_slip_url: str) -> str:
         return f"An error occurred: {exc}"
 
 class SyncUiStateInput(BaseModel):
-    emp_id: str = Field(default="", description="Government employee ID of the user.")
     room_number: str = Field(default="", description="The room number.")
     start_date: str = Field(default="", description="Check-in date in YYYY-MM-DD format.")
     end_date: str = Field(default="", description="Check-out date in YYYY-MM-DD format.")
 
 @tool("sync_ui_state", args_schema=SyncUiStateInput)
-async def sync_ui_state(emp_id: str = "", room_number: str = "", start_date: str = "", end_date: str = "") -> str:
+async def sync_ui_state(room_number: str = "", start_date: str = "", end_date: str = "") -> str:
     """Emit the booking form state to the UI so the user can review and submit the booking manually."""
+    
+    context = ToolContext.current()
+    user_data = None
+    if context:
+        for req in context.requests:
+            if getattr(req, "name", None) == "user" and req.content:
+                user_data = req.content
+                break
+                
+    emp_id = user_data.get("empId", "") if user_data else ""
+    
     logger.warning(f"SYNC UI STATE TRIGGERED for {emp_id} {room_number}")
     
     total_cost = None
