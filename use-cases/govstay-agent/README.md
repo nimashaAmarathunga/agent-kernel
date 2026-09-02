@@ -6,34 +6,31 @@ Government employees frequently struggle with the manual and time-consuming proc
 ## 2. Solution Overview
 GovStay is an AI-powered, multi-agent system built on the **Agent Kernel** framework. It provides a conversational interface for government employees to effortlessly browse circuit bungalows, verify their employee IDs, and manage bookings.
 
-The architecture uses a **LangGraph-based Supervisor pattern** with local Ollama models:
-- **Triage Agent (Supervisor):** Powered by `llama3.2:3b` for fast, lightweight intent routing.
-- **Specialist Agents:** (Search, Verification, Booking, Notification) Powered by `qwen2.5:7b` for complex reasoning and precise tool-calling capabilities.
+The architecture uses a **LangGraph-based Supervisor pattern**:
+- **Triage Agent (Supervisor):** Powered by fast routing models for lightweight intent routing.
+- **Specialist Agents:** (Search, Verification, Booking, Notification) Powered by advanced reasoning models via Groq for complex logic, state manipulation, and precise tool-calling capabilities.
+- **Web Frontend Integration:** The backend seamlessly connects to the GovStay Next.js web application for a complete end-to-end user experience.
+- **Database:** Connects directly to a cloud Postgres database (Supabase) to manage users and bookings.
 - **Security:** A custom `RegexSecurityHook` runs as a pre-hook to instantly detect and block prompt injections and SQL attack patterns without incurring API overhead or latency.
 
 ## 3. Setup Instructions
 
 1. **Install Prerequisites:**
    - Python 3.12 or higher
-   - [Ollama](https://ollama.com/) (running locally)
 
-2. **Pull Local Models:**
-   Ensure Ollama is running, then download the required models:
-   ```bash
-   ollama pull llama3.2:3b
-   ollama pull qwen2.5:7b
-   ```
-
-3. **Configure the Environment:**
+2. **Configure the Environment:**
    Create a `.env` file in this directory based on the provided configuration in the code.
    ```env
    AK_EXECUTION__MODE=stream
-   DATABASE_URL=postgresql://postgres.jcogzodipzjchvpcmqnu:BKGIkyfO8gkUBLMJ@aws-0-eu-west-1.pooler.supabase.com:6543/postgres?pgbouncer=true&sslmode=require&sslaccept=accept_invalid_certs
-   GEMINI_API_KEY=your_google_gemini_api_key
+   DATABASE_URL=postgresql://<user>:<password>@<host>:6543/postgres?pgbouncer=true&sslmode=require
+   LLM_PROVIDER=groq
+   GROQ_API_KEY=your_groq_api_key
+   TELEGRAM_BOT_TOKEN=your_telegram_token
+   SUPABASE_URL=your_supabase_url
+   SUPABASE_SERVICE_ROLE_KEY=your_supabase_key
    ```
-   *(Note: The Gemini API key is currently bypassed in favor of local Ollama models, but may be required by underlying Agent Kernel initializations depending on your global settings).*
 
-4. **Install Dependencies:**
+3. **Install Dependencies:**
    Create a virtual environment and install the required packages:
    ```bash
    python -m venv .venv
@@ -53,8 +50,7 @@ The application is split into a REST server/background worker and a CLI client.
    This script will launch the GovStay multi-agent REST server on `localhost:8000` and start the batch verifier in the background.
 
 2. **Interact with the Agent:**
-   Open a **new terminal window**, activate the virtual environment, and run the CLI client:
+   You can interact with the agent via the GovStay Web Frontend UI, via the Telegram Bot integration, or by running the local CLI client:
    ```bash
    python cli_client.py
    ```
-   You can now interact with the GovStay agent via the terminal prompt.
