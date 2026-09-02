@@ -3,7 +3,7 @@ fastapi
 uvicorn
 asyncpg
 langgraph
-agentkernel
+git+https://github.com/nimashaAmarathunga/agent-kernel.git#subdirectory=ak-py
 langchain-groq
 python-dotenv
 supabase
