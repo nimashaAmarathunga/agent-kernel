@@ -129,8 +129,13 @@ If you cannot find any amount, output:
         # Robustly parse amount
         raw_amt = extracted_data.get("amount", 0)
         if isinstance(raw_amt, str):
-            raw_amt = raw_amt.replace(",", "").strip()
-            
+            # Extract just the numeric part (e.g. from "Rs. 7,000.00")
+            numeric_match = re.search(r'\d+(?:[.,]\d+)?', raw_amt.replace(',', ''))
+            if numeric_match:
+                raw_amt = numeric_match.group(0)
+            else:
+                raw_amt = "0"
+                
         try:
             amount = float(raw_amt)
         except (ValueError, TypeError):
