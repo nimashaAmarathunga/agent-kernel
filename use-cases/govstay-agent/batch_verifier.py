@@ -74,9 +74,10 @@ async def process_slip(conn, booking):
                 
         if not text.strip():
             logger.warning("Could not extract text from PDF. (Might be an image-only PDF)")
-            # FALLBACK FOR DEMO PURPOSES: If we can't extract text (e.g. it's an image), we will assume the slip is valid for the total cost.
-            text = f"Total Amount Paid: {total_cost}"
-            
+            await conn.execute("UPDATE payment_slips SET \"verificationStatus\" = 'REJECTED' WHERE \"bookingId\" = $1", booking_id)
+            await conn.execute("UPDATE bookings SET status = 'REJECTED', \"approvalReason\" = 'Failed to extract text from slip. Please upload a text-based PDF.' WHERE id = $1", booking_id)
+            await notify_booking_rejected(booking, "Failed to extract text from slip. Please upload a text-based PDF.")
+            return
         # Ask LLaMA to extract the amount
         prompt = f"""You are a data extraction bot. I am giving you the raw text extracted from a bank transfer slip.
 Your job is to find the EXACT amount that was transferred.
@@ -92,23 +93,30 @@ If you cannot find any amount, output:
         # 3. Update status to LLM validating
         await conn.execute("UPDATE bookings SET \"approvalReason\" = 'Agent: Passing text to LLaMA to validate payment amount...' WHERE id = $1", booking_id)
         
-        response = await llm.ainvoke(prompt)
-        
-        # Parse LLaMA response
-        content = response.content.strip()
-        import json
-        import re
         try:
-            # Extract json using regex in case LLM outputs conversational text
-            json_match = re.search(r'\{.*\}', content, re.DOTALL)
-            if json_match:
-                content = json_match.group(0)
-            extracted_data = json.loads(content)
-        except json.JSONDecodeError:
-            logger.error(f"Failed to parse JSON from LLM: {content}")
+            response = await llm.ainvoke(prompt)
+            
+            # Parse LLaMA response
+            content = response.content.strip()
+            import json
+            import re
+            try:
+                # Extract json using regex in case LLM outputs conversational text
+                json_match = re.search(r'\{.*\}', content, re.DOTALL)
+                if json_match:
+                    content = json_match.group(0)
+                extracted_data = json.loads(content)
+            except json.JSONDecodeError:
+                logger.error(f"Failed to parse JSON from LLM: {content}")
+                await conn.execute("UPDATE payment_slips SET \"verificationStatus\" = 'REJECTED' WHERE \"bookingId\" = $1", booking_id)
+                await conn.execute("UPDATE bookings SET status = 'REJECTED', \"approvalReason\" = 'Failed to extract amount from slip automatically' WHERE id = $1", booking_id)
+                await notify_booking_rejected(booking, "Failed to extract amount from slip automatically.")
+                return
+        except Exception as e:
+            logger.error(f"LLM connection error: {e}")
             await conn.execute("UPDATE payment_slips SET \"verificationStatus\" = 'REJECTED' WHERE \"bookingId\" = $1", booking_id)
-            await conn.execute("UPDATE bookings SET status = 'REJECTED', \"approvalReason\" = 'Failed to extract amount from slip automatically' WHERE id = $1", booking_id)
-            await notify_booking_rejected(booking, "Failed to extract amount from slip automatically.")
+            await conn.execute("UPDATE bookings SET status = 'REJECTED', \"approvalReason\" = 'Verification failed due to LLM processing error' WHERE id = $1", booking_id)
+            await notify_booking_rejected(booking, "Verification failed due to AI processing error.")
             return
             
         if not extracted_data.get("found"):
