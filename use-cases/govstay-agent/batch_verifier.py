@@ -144,7 +144,7 @@ If you cannot find any amount, output:
         logger.info(f"Booking cost: {total_cost}, Slip amount: {amount}")
         
         import math
-        if math.isclose(amount, total_cost, abs_tol=0.01):
+        if math.isclose(amount, float(total_cost), abs_tol=0.01):
             # Payment exact! Confirm the booking.
             await conn.execute("UPDATE payment_slips SET \"verificationStatus\" = 'VERIFIED' WHERE \"bookingId\" = $1", booking_id)
             await conn.execute(
@@ -168,6 +168,12 @@ If you cannot find any amount, output:
             
     except Exception as e:
         logger.error(f"Error processing slip for booking {booking_id}: {e}")
+        # Mark as rejected to avoid infinite loops on unhandled exceptions
+        try:
+            await conn.execute("UPDATE payment_slips SET \"verificationStatus\" = 'REJECTED' WHERE \"bookingId\" = $1", booking_id)
+            await conn.execute("UPDATE bookings SET status = 'REJECTED', \"approvalReason\" = 'System error during verification' WHERE id = $1", booking_id)
+        except Exception as db_e:
+            logger.error(f"Failed to update status on error: {db_e}")
     finally:
         # Clean up temp file
         if os.path.exists(temp_path):
