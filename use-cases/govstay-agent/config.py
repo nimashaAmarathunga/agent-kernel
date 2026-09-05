@@ -26,12 +26,26 @@ OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434/v1")
 LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "groq").lower()
 
 def get_model(role="reasoning", temperature=0.0, max_tokens=None, tags=None):
-    from langchain_groq import ChatGroq
-    model_name = "openai/gpt-oss-20b" if role == "router" else "openai/gpt-oss-120b"
-    return ChatGroq(
-        model=model_name,
-        temperature=temperature,
-        max_tokens=max_tokens,
-        tags=tags,
-        streaming=True
-    )
+    provider = LLM_PROVIDER.lower()
+    if provider == "ollama" or provider == "local":
+        from langchain_openai import ChatOpenAI
+        model_name = ROUTER_MODEL if role == "router" else REASONING_MODEL
+        return ChatOpenAI(
+            model=model_name,
+            base_url=OLLAMA_BASE_URL,
+            api_key="ollama",
+            temperature=temperature,
+            max_tokens=max_tokens,
+            tags=tags,
+            streaming=True
+        )
+    else:
+        from langchain_groq import ChatGroq
+        model_name = "llama3-8b-8192" if role == "router" else "llama3-70b-8192"
+        return ChatGroq(
+            model=model_name,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            tags=tags,
+            streaming=True
+        )

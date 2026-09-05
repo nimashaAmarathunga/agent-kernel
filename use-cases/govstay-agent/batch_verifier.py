@@ -130,7 +130,7 @@ If you cannot find any amount, output:
         raw_amt = extracted_data.get("amount", 0)
         if isinstance(raw_amt, str):
             # Extract just the numeric part (e.g. from "Rs. 7,000.00")
-            numeric_match = re.search(r'\d+(?:[.,]\d+)?', raw_amt.replace(',', ''))
+            numeric_match = re.search(r'\d+(?:\.\d+)?', raw_amt.replace(',', '').replace(' ', ''))
             if numeric_match:
                 raw_amt = numeric_match.group(0)
             else:
