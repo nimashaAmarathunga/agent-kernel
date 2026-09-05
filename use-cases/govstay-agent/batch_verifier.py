@@ -143,8 +143,9 @@ If you cannot find any amount, output:
         
         logger.info(f"Booking cost: {total_cost}, Slip amount: {amount}")
         
-        if amount >= total_cost:
-            # Payment sufficient! Confirm the booking.
+        import math
+        if math.isclose(amount, total_cost, abs_tol=0.01):
+            # Payment exact! Confirm the booking.
             await conn.execute("UPDATE payment_slips SET \"verificationStatus\" = 'VERIFIED' WHERE \"bookingId\" = $1", booking_id)
             await conn.execute(
                 "UPDATE bookings SET status = 'CONFIRMED', \"approvalReason\" = 'Slip verified successfully.', \"confidenceScore\" = 0.99 WHERE id = $1", 
@@ -154,15 +155,15 @@ If you cannot find any amount, output:
             
             await notify_booking_confirmed(booking)
         else:
-            # Payment insufficient!
-            reason = f"Transferred amount (LKR {amount}) is less than total cost (LKR {total_cost})."
+            # Payment incorrect!
+            reason = f"Transferred amount (LKR {amount}) does not match the total booking cost (LKR {total_cost})."
             await conn.execute("UPDATE payment_slips SET \"verificationStatus\" = 'REJECTED' WHERE \"bookingId\" = $1", booking_id)
             await conn.execute(
                 "UPDATE bookings SET status = 'REJECTED', \"approvalReason\" = $1, \"confidenceScore\" = 0.99 WHERE id = $2", 
                 reason,
                 booking_id
             )
-            logger.info(f"Booking {booking['bookingId']} REJECTED due to insufficient funds.")
+            logger.info(f"Booking {booking['bookingId']} REJECTED due to amount mismatch.")
             await notify_booking_rejected(booking, reason)
             
     except Exception as e:
