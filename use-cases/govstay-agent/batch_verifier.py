@@ -114,7 +114,7 @@ async def process_slip(conn, booking):
         logger.info(f"[BatchVerifier] Downloaded {len(file_bytes)} bytes from storage")
     except Exception as e:
         logger.error(f"[BatchVerifier] Slip download failed: {e}")
-        await _set_error(conn, booking_id, "Slip file not found or download error — will retry")
+        await _set_retry(conn, booking_id, "Slip file not found or download error — retrying...")
         return
 
     # Determine file extension from the storage path
@@ -173,7 +173,7 @@ If you cannot find any amount, output:
             logger.info(f"[BatchVerifier] LLM raw response: {content!r}")
         except Exception as e:
             logger.error(f"[BatchVerifier] Groq LLM call failed: {e}")
-            await _set_error(conn, booking_id, "AI service temporarily unavailable — will retry")
+            await _set_retry(conn, booking_id, "AI service temporarily unavailable — retrying...")
             return
 
         # ---- STEP 4: Parse LLM JSON response ----
@@ -192,7 +192,7 @@ If you cannot find any amount, output:
 
         if extracted_data is None:
             logger.error(f"[BatchVerifier] Failed to parse JSON from LLM response: {content!r}")
-            await _set_error(conn, booking_id, "AI response could not be parsed — will retry")
+            await _set_retry(conn, booking_id, "AI response could not be parsed — retrying...")
             return
 
         logger.info(f"[BatchVerifier] Parsed LLM data: {extracted_data}")
@@ -251,7 +251,7 @@ If you cannot find any amount, output:
 
     except Exception as e:
         logger.error(f"[BatchVerifier] Unexpected error processing booking {booking_id}: {e}", exc_info=True)
-        await _set_error(conn, booking_id, f"System error during verification — will retry")
+        await _set_retry(conn, booking_id, f"System error during verification — retrying...")
     finally:
         if os.path.exists(temp_path):
             os.remove(temp_path)
@@ -259,21 +259,34 @@ If you cannot find any amount, output:
 
 async def _set_error(conn, booking_id: str, reason: str):
     """
-    Set a technical error state. The booking stays PENDING so the verifier can retry.
-    The payment slip is marked ERROR to distinguish from genuine REJECTED.
+    Set a permanent error state (REJECTED).
+    The user will see it's rejected and must upload a new slip.
     """
     try:
         await conn.execute(
-            "UPDATE payment_slips SET \"verificationStatus\" = 'ERROR' WHERE \"bookingId\" = $1",
+            "UPDATE payment_slips SET \"verificationStatus\" = 'REJECTED' WHERE \"bookingId\" = $1",
             booking_id
         )
+        await conn.execute(
+            "UPDATE bookings SET status = 'REJECTED', \"approvalReason\" = $1 WHERE id = $2",
+            reason, booking_id
+        )
+        logger.info(f"[BatchVerifier] Set REJECTED state for booking {booking_id}: {reason}")
+    except Exception as db_e:
+        logger.error(f"[BatchVerifier] Failed to set rejected state: {db_e}")
+
+async def _set_retry(conn, booking_id: str, reason: str):
+    """
+    Set a temporary error state. The booking stays PENDING so the verifier retries next loop.
+    """
+    try:
         await conn.execute(
             "UPDATE bookings SET \"approvalReason\" = $1 WHERE id = $2",
             reason, booking_id
         )
-        logger.info(f"[BatchVerifier] Set ERROR state for booking {booking_id}: {reason}")
+        logger.info(f"[BatchVerifier] Set RETRY state for booking {booking_id}: {reason}")
     except Exception as db_e:
-        logger.error(f"[BatchVerifier] Failed to set error state: {db_e}")
+        logger.error(f"[BatchVerifier] Failed to set retry state: {db_e}")
 
 
 async def verify_loop():
