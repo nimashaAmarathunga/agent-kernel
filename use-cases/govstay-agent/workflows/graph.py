@@ -20,6 +20,7 @@ builder.add_node("travel_agent", travel_agent)
 builder.add_node("booking_agent", booking_agent)
 builder.add_node("verification_agent", verification_agent)
 builder.add_node("notification_agent", notification_agent)
+builder.add_node("itinerary_agent", itinerary_agent)
 
 # Edges
 builder.add_edge(START, "supervisor")
@@ -32,6 +33,7 @@ builder.add_conditional_edges(
         "booking_agent": "booking_agent",
         "verification_agent": "verification_agent",
         "notification_agent": "notification_agent",
+        "itinerary_agent": "itinerary_agent",
     }
 )
 
@@ -39,6 +41,7 @@ builder.add_edge("travel_agent", END)
 builder.add_edge("booking_agent", END)
 builder.add_edge("verification_agent", END)
 builder.add_edge("notification_agent", END)
+builder.add_edge("itinerary_agent", END)
 
 memory = MemorySaver()
 triage_agent = builder.compile(checkpointer=memory)

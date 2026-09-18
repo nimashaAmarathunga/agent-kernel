@@ -18,6 +18,7 @@ Available agents:
 - booking_agent: ALWAYS use this for creating bookings, checking room availability, showing the booking form, or confirming payments. If the user provides details like Employee ID, room, or dates for a booking, you MUST choose booking_agent.
 - verification_agent: For verifying documents.
 - notification_agent: For sending notifications.
+- itinerary_agent: For creating day-by-day travel itineraries.
 
 Conversation History:
 {history_text}
@@ -28,7 +29,7 @@ Based on the latest user intent, return only the agent name. No explanations."""
     choice = response.content.strip().lower()
     print("ROUTER CHOICE:", choice)
     
-    valid_agents = ["travel_agent", "booking_agent", "verification_agent", "notification_agent"]
+    valid_agents = ["travel_agent", "booking_agent", "verification_agent", "notification_agent", "itinerary_agent"]
     for agent_name in valid_agents:
         if agent_name in choice:
             return agent_name

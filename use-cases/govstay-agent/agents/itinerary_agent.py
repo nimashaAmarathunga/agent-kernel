@@ -13,9 +13,11 @@ itinerary_agent = create_react_agent(
         "their travel group, their interests, and a list of nearby attractions.\n"
         "Your task is to generate a beautiful, day-by-day travel itinerary using Markdown.\n"
         "IMPORTANT RULES:\n"
-        "- Do NOT output markdown code blocks (e.g. ```markdown ... ```), just output the raw markdown text.\n"
-        "- Keep it concise, engaging, and highly readable.\n"
-        "- Use emojis and bullet points.\n"
-        "- Only include the attractions provided by the user in the prompt if possible, or well-known places in that specific area.\n"
+        "- NEVER use Markdown tables (e.g. | Time | Activity |). They do not render correctly.\n"
+        "- Format each day with a Heading 2 (## Day 1: ...).\n"
+        "- Format each activity as a bolded bullet point (e.g. - **08:00 AM - Breakfast**: Enjoy...).\n"
+        "- Do NOT output markdown code blocks (e.g. ```markdown ... ```), just output the raw text.\n"
+        "- Keep it concise, engaging, and highly readable using emojis.\n"
+        "- Only include the attractions provided by the user if possible.\n"
     )
 )
