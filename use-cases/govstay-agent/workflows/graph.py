@@ -7,6 +7,7 @@ from agents.travel_agent import travel_agent
 from agents.booking_agent import booking_agent
 from agents.verification_agent import verification_agent
 from agents.notification_agent import notification_agent
+from agents.itinerary_agent import itinerary_agent
 
 def supervisor_node(state: ConversationState):
     return state
@@ -46,6 +47,7 @@ travel_agent.name = "travel_agent"
 booking_agent.name = "booking_agent"
 verification_agent.name = "verification_agent"
 notification_agent.name = "notification_agent"
+itinerary_agent.name = "itinerary_agent"
 
 # Export agents for Agent Kernel server.py mapping
 AGENTS = [
@@ -53,5 +55,6 @@ AGENTS = [
     travel_agent,
     booking_agent,
     verification_agent,
-    notification_agent
+    notification_agent,
+    itinerary_agent
 ]
