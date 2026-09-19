@@ -141,6 +141,86 @@ Build once. Ship to every channel your users live on. No bespoke bot code.
 
 ---
 
+## 🏗️ Real-World Example: GovStay-AI Architecture
+
+Agent Kernel is built to power complex, multi-agent enterprise applications. Here is the production architecture for **GovStay-AI**, demonstrating how Agent Kernel orchestrates multiple local LLMs, LangGraph agents, and database operations behind a secure API:
+
+```mermaid
+graph TD
+    %% Styles
+    classDef frontend fill:#0a192f,stroke:#4a5568,color:#fff
+    classDef llm fill:#4a154b,stroke:#805ad5,color:#fff
+    classDef agent fill:#0f382e,stroke:#38a169,color:#fff
+    classDef security fill:#742a2a,stroke:#fc8181,color:#fff
+    classDef db fill:#ffffff,stroke:#718096,color:#000
+
+    subgraph Frontend [Frontend Next.js]
+        UI["Next.js App UI"]:::frontend
+        API["Next.js API"]:::frontend
+        UI --> API
+    end
+
+    subgraph AI_Models [AI Models]
+        Qwen["Qwen 2.5 (7B/14B)"]:::llm
+        Llama["Llama 3.2 (3B)"]:::llm
+    end
+
+    subgraph Orchestration [Agent Kernel Orchestration]
+        REST["REST API"]:::agent
+        Batch["Batch Verifier"]:::agent
+        PreHook["PreHook (Security)"]:::security
+        Supervisor["Supervisor"]:::agent
+        PostHook["PostHook (Sanitization)"]:::security
+        
+        subgraph Agents [LangGraph Specialist Agents]
+            Verify["Verification Agent"]:::agent
+            Travel["Travel Agent"]:::agent
+            Booking["Booking Agent"]:::agent
+            Itinerary["Itinerary Agent"]:::agent
+        end
+    end
+
+    subgraph DB_Layer [Database Layer]
+        Prisma["Prisma ORM"]:::db
+        Postgres[("PostgreSQL")]:::db
+        Prisma --> Postgres
+    end
+
+    %% Flow Connections
+    API --> REST
+    API --> Batch
+
+    REST --> PreHook
+    PreHook --> Supervisor
+    
+    Supervisor --> Verify
+    Supervisor --> Travel
+    Supervisor --> Booking
+    Supervisor --> Itinerary
+
+    Verify --> PostHook
+    Travel --> PostHook
+    Booking --> PostHook
+    Itinerary --> PostHook
+
+    PostHook -.->|Clean Response| REST
+
+    Batch --> Prisma
+    Verify --> Prisma
+    Travel --> Prisma
+    Booking --> Prisma
+    Itinerary --> Prisma
+
+    Supervisor --> Llama
+    Verify --> Qwen
+    Travel --> Qwen
+    Booking --> Qwen
+    Itinerary --> Qwen
+    Batch --> Qwen
+```
+
+---
+
 ## ☁️ Deploy Anywhere
 
 Same agent code. Pick your runtime. Full Terraform modules included.
