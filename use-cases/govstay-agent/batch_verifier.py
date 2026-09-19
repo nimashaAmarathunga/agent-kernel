@@ -102,6 +102,12 @@ async def process_slip(conn, booking):
 
     logger.info(f"[BatchVerifier] Normalized expected amount: {expected_amount}")
 
+    # Fetch central bank account details
+    config_row = await conn.fetchrow('SELECT "accountNumber", "bankName", "accountName" FROM "system_config" WHERE id = $1', 'global')
+    expected_account_number = config_row['accountNumber'] if config_row else "123456"
+    expected_bank_name = config_row['bankName'] if config_row else "ABC Bank"
+    expected_account_name = config_row['accountName'] if config_row else "GovSewana Official Bank Account"
+
     # 1. Update status to processing
     await conn.execute(
         "UPDATE bookings SET \"approvalReason\" = 'Agent: Waking up to process slip...' WHERE id = $1",
@@ -157,15 +163,15 @@ async def process_slip(conn, booking):
         )
 
         prompt = f"""You are a data extraction bot. I am giving you the raw text extracted from a bank transfer slip.
-Your job is to find the EXACT amount that was transferred.
+Your job is to find the EXACT amount that was transferred AND the destination bank account number.
 
 Raw text from slip:
 {text}
 
 Output a strict JSON object with this exact format, and NOTHING else:
-{{"found": true, "amount": 1234.50}}
-If you cannot find any amount, output:
-{{"found": false, "amount": 0}}"""
+{{"found": true, "amount": 1234.50, "account_number": "82736451"}}
+If you cannot find any amount or account number, output:
+{{"found": false, "amount": 0, "account_number": ""}}"""
 
         try:
             response = await llm.ainvoke(prompt)
@@ -214,16 +220,22 @@ If you cannot find any amount, output:
         logger.info(f"[BatchVerifier] Extracted amount (normalized): {extracted_amount}")
         logger.info(f"[BatchVerifier] Expected amount (normalized): {expected_amount}")
 
-        # ---- STEP 6: Deterministic amount comparison ----
+        # ---- STEP 6: Deterministic comparison ----
+        extracted_account_number = str(extracted_data.get("account_number", "")).strip()
+        extracted_account_number = re.sub(r'\D', '', extracted_account_number)
+        clean_expected_account = re.sub(r'\D', '', expected_account_number)
+        
         amounts_match = (extracted_amount == expected_amount)
-        logger.info(f"[BatchVerifier] Amount match: {amounts_match}")
+        accounts_match = (extracted_account_number == clean_expected_account)
+        
+        logger.info(f"[BatchVerifier] Amount match: {amounts_match}, Account match: {accounts_match}")
 
         await conn.execute(
-            "UPDATE bookings SET \"approvalReason\" = 'Agent: Comparing extracted amount against booking total...' WHERE id = $1",
+            "UPDATE bookings SET \"approvalReason\" = 'Agent: Comparing extracted details against booking...' WHERE id = $1",
             booking_id
         )
 
-        if amounts_match:
+        if amounts_match and accounts_match:
             # ---- CONFIRMED ----
             await conn.execute(
                 "UPDATE payment_slips SET \"verificationStatus\" = 'VERIFIED' WHERE \"bookingId\" = $1",
@@ -233,11 +245,15 @@ If you cannot find any amount, output:
                 "UPDATE bookings SET status = 'CONFIRMED', \"approvalReason\" = 'Slip verified successfully.', \"confidenceScore\" = 0.99 WHERE id = $1",
                 booking_id
             )
-            logger.info(f"[BatchVerifier] ✅ Booking {booking_display_id} CONFIRMED (LKR {extracted_amount} == LKR {expected_amount})")
+            logger.info(f"[BatchVerifier] ✅ Booking {booking_display_id} CONFIRMED")
             await notify_booking_confirmed(booking)
         else:
-            # ---- REJECTED (genuine amount mismatch) ----
-            reason = f"Transferred amount (LKR {extracted_amount}) does not match the total booking cost (LKR {expected_amount})."
+            # ---- REJECTED ----
+            if not accounts_match:
+                reason = f"Deposited account number ({extracted_account_number or 'Not Found'}) does not match the official {expected_bank_name} account ({expected_account_number})."
+            else:
+                reason = f"Transferred amount (LKR {extracted_amount}) does not match the total booking cost (LKR {expected_amount})."
+                
             await conn.execute(
                 "UPDATE payment_slips SET \"verificationStatus\" = 'REJECTED' WHERE \"bookingId\" = $1",
                 booking_id
@@ -246,7 +262,7 @@ If you cannot find any amount, output:
                 "UPDATE bookings SET status = 'REJECTED', \"approvalReason\" = $1, \"confidenceScore\" = 0.99 WHERE id = $2",
                 reason, booking_id
             )
-            logger.info(f"[BatchVerifier] ❌ Booking {booking_display_id} REJECTED — amount mismatch (LKR {extracted_amount} != LKR {expected_amount})")
+            logger.info(f"[BatchVerifier] ❌ Booking {booking_display_id} REJECTED — {reason}")
             await notify_booking_rejected(booking, reason)
 
     except Exception as e:
